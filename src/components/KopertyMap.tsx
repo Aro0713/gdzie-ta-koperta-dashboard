@@ -167,6 +167,7 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
   const userCircle = useRef<import("leaflet").Circle | null>(null);
   const osmLayer = useRef<import("leaflet").LayerGroup | null>(null);
   const userAddedLayer = useRef<import("leaflet").LayerGroup | null>(null);
+  const userSpotsHydrated = useRef(false);
 
   const [locationMessage, setLocationMessage] = useState(
     "Mapa gotowa. Pobierz lokalizację, aby zobaczyć koperty w promieniu 5 km."
@@ -226,9 +227,9 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
       }).addTo(map);
 
       const localSpots = readLocalUserSpots();
+      userSpotsHydrated.current = true;
       setUserAddedSpots(localSpots);
       drawUserAddedSpots(localSpots, L, map);
-      onUserSpotsChange?.(localSpots);
 
       window.setTimeout(() => {
         locateUserAndLoadOsm();
@@ -269,6 +270,17 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
       map.off("click", handleClick);
     };
   }, [addingMode]);
+
+  useEffect(() => {
+    if (!userSpotsHydrated.current) {
+      return;
+    }
+
+    // Synchronizujemy punkty użytkownika po renderze, nie w trakcie setState.
+    persistLocalUserSpots(userAddedSpots);
+    drawUserAddedSpots(userAddedSpots);
+    onUserSpotsChange?.(userAddedSpots);
+  }, [userAddedSpots, onUserSpotsChange]);
 
   function clearOsmLayer() {
     const map = leafletMap.current;
@@ -427,7 +439,7 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
 
   async function fetchOsmParking(lat: number, lng: number) {
     setLoadingOsm(true);
-    setLocationMessage("Pobieram dane z OpenStreetMap dla promienia 5 km…");
+    setLocationMessage("Filtruję snapshot OpenStreetMap dla promienia 5 km…");
 
     try {
       const params = new URLSearchParams({
@@ -479,15 +491,7 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
       confirmations: 0
     };
 
-    setUserAddedSpots((current) => {
-      const next = [newSpot, ...current];
-
-      persistLocalUserSpots(next);
-      drawUserAddedSpots(next);
-      onUserSpotsChange?.(next);
-
-      return next;
-    });
+    setUserAddedSpots((current) => [newSpot, ...current]);
 
     setLocationMessage(
       "Dodano lokalny punkt koperty. Na razie jest zapisany tylko w tej przeglądarce."
@@ -495,10 +499,7 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
   }
 
   function clearUserSpots() {
-    persistLocalUserSpots([]);
     setUserAddedSpots([]);
-    drawUserAddedSpots([]);
-    onUserSpotsChange?.([]);
     setLocationMessage("Usunięto lokalne szkice kopert z tej przeglądarki.");
   }
 
@@ -624,4 +625,7 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
     </div>
   );
 }
+
+
+
 
