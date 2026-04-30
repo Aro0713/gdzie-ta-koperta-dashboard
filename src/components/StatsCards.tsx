@@ -1,14 +1,41 @@
-﻿const stats = [
-  { label: "koperty w bazie", value: "3", detail: "dane demo MVP" },
-  { label: "potwierdzone", value: "1", detail: "ostatnia weryfikacja: dziś" },
-  { label: "do sprawdzenia", value: "2", detail: "społeczność decyduje" },
-  { label: "wnioski", value: "0", detail: "moduł w przygotowaniu" }
+﻿export type StatsCardItem = {
+  label: string;
+  value: string | number;
+  detail: string;
+};
+
+const defaultStats: StatsCardItem[] = [
+  {
+    label: "koperty w bazie",
+    value: "—",
+    detail: "czekam na lokalizację"
+  },
+  {
+    label: "nowe koperty GTK",
+    value: "—",
+    detail: "punkty dodane przez użytkowników"
+  },
+  {
+    label: "potwierdzone",
+    value: "—",
+    detail: "próg: 5 potwierdzeń"
+  },
+  {
+    label: "do sprawdzenia",
+    value: "—",
+    detail: "czekają na społeczność"
+  },
+  {
+    label: "wnioski",
+    value: "—",
+    detail: "z modułu wniosków"
+  }
 ];
 
-export function StatsCards() {
+export function StatsCards({ items = defaultStats }: { items?: StatsCardItem[] }) {
   return (
     <section className="stats-grid" aria-label="Statystyki projektu">
-      {stats.map((item) => (
+      {items.map((item) => (
         <article className="stat-card" key={item.label}>
           <span>{item.label}</span>
           <strong>{item.value}</strong>

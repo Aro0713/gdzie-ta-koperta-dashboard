@@ -31,12 +31,13 @@ type LeafletWithCluster = LeafletBase & {
   ) => import("leaflet").LayerGroup;
 };
 
-type UserAddedSpot = {
+export type UserAddedSpot = {
   id: string;
   lat: number;
   lng: number;
   createdAt: string;
   status: "local_draft";
+  confirmations?: number;
 };
 
 const SEARCH_RADIUS_METERS = 5000;
@@ -155,9 +156,10 @@ function buildUserSpotPopupHtml(spot: UserAddedSpot) {
 type KopertyMapProps = {
   full?: boolean;
   onOsmData?: (data: OsmParkingResponse) => void;
+  onUserSpotsChange?: (spots: UserAddedSpot[]) => void;
 };
 
-export function KopertyMap({ full = false, onOsmData }: KopertyMapProps) {
+export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: KopertyMapProps) {
   const mapNode = useRef<HTMLDivElement | null>(null);
   const leafletMap = useRef<import("leaflet").Map | null>(null);
   const leafletApi = useRef<LeafletWithCluster | null>(null);
@@ -226,6 +228,7 @@ export function KopertyMap({ full = false, onOsmData }: KopertyMapProps) {
       const localSpots = readLocalUserSpots();
       setUserAddedSpots(localSpots);
       drawUserAddedSpots(localSpots, L, map);
+      onUserSpotsChange?.(localSpots);
 
       window.setTimeout(() => {
         locateUserAndLoadOsm();
@@ -472,7 +475,8 @@ export function KopertyMap({ full = false, onOsmData }: KopertyMapProps) {
       lat,
       lng,
       createdAt: new Date().toISOString(),
-      status: "local_draft"
+      status: "local_draft",
+      confirmations: 0
     };
 
     setUserAddedSpots((current) => {
@@ -480,6 +484,7 @@ export function KopertyMap({ full = false, onOsmData }: KopertyMapProps) {
 
       persistLocalUserSpots(next);
       drawUserAddedSpots(next);
+      onUserSpotsChange?.(next);
 
       return next;
     });
@@ -493,6 +498,7 @@ export function KopertyMap({ full = false, onOsmData }: KopertyMapProps) {
     persistLocalUserSpots([]);
     setUserAddedSpots([]);
     drawUserAddedSpots([]);
+    onUserSpotsChange?.([]);
     setLocationMessage("Usunięto lokalne szkice kopert z tej przeglądarki.");
   }
 
@@ -618,3 +624,4 @@ export function KopertyMap({ full = false, onOsmData }: KopertyMapProps) {
     </div>
   );
 }
+
