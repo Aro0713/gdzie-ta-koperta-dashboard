@@ -1,4 +1,6 @@
 ﻿@import "leaflet/dist/leaflet.css";
+@import "leaflet.markercluster/dist/MarkerCluster.css";
+@import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 
 :root {
   --bg: #eef4fb;
@@ -304,7 +306,7 @@ h3 {
 }
 
 .dashboard-grid-map {
-  align-items: start;
+  align-items: flex-start;
 }
 
 .content-grid,
@@ -328,7 +330,7 @@ h3 {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  align-items: start;
+  align-items: flex-start;
   margin-bottom: 16px;
 }
 
@@ -617,4 +619,243 @@ textarea {
   .map-toolbar {
     border-radius: 20px;
   }
+}
+
+.map-toolbar-expanded {
+  border-radius: 22px;
+  align-items: flex-start;
+}
+
+.map-status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: #0c4a8a;
+  background: rgba(20, 119, 212, 0.1);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.osm-marker {
+  display: grid;
+  place-items: center;
+  border: 3px solid white;
+  border-radius: 999px;
+  color: white;
+  box-shadow: 0 10px 28px rgba(14, 34, 63, 0.28);
+}
+
+.osm-marker span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  font-weight: 900;
+  font-size: 0.95rem;
+}
+
+.osm-marker-space {
+  background: #1477d4;
+}
+
+.osm-marker-parking {
+  background: #168b5b;
+}
+
+.osm-marker-default {
+  background: #667085;
+}
+
+.live-user-marker {
+  animation: pulse-user 1.8s infinite;
+}
+
+@keyframes pulse-user {
+  0% {
+    box-shadow: 0 0 0 0 rgba(20, 119, 212, 0.35);
+  }
+
+  70% {
+    box-shadow: 0 0 0 12px rgba(20, 119, 212, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(20, 119, 212, 0);
+  }
+}
+
+.osm-popup {
+  display: grid;
+  gap: 8px;
+  min-width: 230px;
+  color: #142033;
+}
+
+.osm-popup strong {
+  font-size: 0.98rem;
+}
+
+.osm-popup span {
+  color: #667085;
+  font-size: 0.82rem;
+}
+
+.osm-popup dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.osm-popup dt {
+  color: #667085;
+  font-weight: 700;
+}
+
+.osm-popup dd {
+  margin: 0;
+  font-weight: 800;
+}
+
+.osm-popup a {
+  color: #0c4a8a;
+  font-weight: 900;
+}
+
+
+.osm-sidebar {
+  max-height: 760px;
+  overflow: hidden;
+}
+
+.osm-side-list {
+  display: grid;
+  gap: 12px;
+  max-height: 650px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.osm-side-card,
+.empty-state-card {
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.osm-side-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.osm-side-card-top h3 {
+  margin-bottom: 4px;
+}
+
+.osm-side-card-top p,
+.empty-state-card span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.osm-side-card-top > span {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-radius: 999px;
+  color: white;
+  background: var(--blue);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.osm-side-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.osm-side-meta span {
+  padding: 6px 9px;
+  border-radius: 999px;
+  color: #344054;
+  background: rgba(20, 32, 51, 0.06);
+  font-size: 0.78rem;
+}
+
+.osm-side-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.mini-button {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--blue-dark);
+  background: rgba(20, 119, 212, 0.09);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.marker-cluster-small,
+.marker-cluster-medium,
+.marker-cluster-large {
+  background-color: rgba(20, 119, 212, 0.18);
+}
+
+.marker-cluster-small div,
+.marker-cluster-medium div,
+.marker-cluster-large div {
+  color: white;
+  background: linear-gradient(135deg, var(--blue), var(--cyan));
+  font-weight: 900;
+}
+
+.user-added-marker {
+  display: grid;
+  place-items: center;
+  border: 3px solid white;
+  border-radius: 999px;
+  color: white;
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  box-shadow: 0 12px 32px rgba(239, 68, 68, 0.35);
+}
+
+.user-added-marker span {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  font-size: 1.1rem;
+  font-weight: 1000;
+}
+
+.add-mode-button {
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.add-mode-button-active {
+  color: white;
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+}
+
+.clear-local-button {
+  color: #7f1d1d;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.map-node-adding {
+  cursor: crosshair;
 }
