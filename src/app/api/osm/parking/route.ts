@@ -1,44 +1,52 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+﻿import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { NextRequest, NextResponse } from "next/server";
+import type { Feature, FeatureCollection, Point } from "geojson";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type OverpassElement = {
-  type: "node" | "way" | "relation";
-  id: number;
-  lat?: number;
-  lon?: number;
-  center?: {
-    lat: number;
-    lon: number;
-  };
+type SnapshotProperties = {
+  source?: string;
+  sourceStatus?: string;
+  objectType?: string;
+  osmType?: string;
+  osmId?: number | string | null;
+  osmUrl?: string | null;
+  name?: string | null;
+  amenity?: string | null;
+  parking?: string | null;
+  parkingSpace?: string | null;
+  capacity?: string | null;
+  capacityDisabled?: string | null;
+  access?: string | null;
+  wheelchair?: string | null;
+  surface?: string | null;
+  operator?: string | null;
+  areaId?: string;
+  areaName?: string;
+  syncedAt?: string;
+  originalGeometryType?: string | null;
+  distanceMeters?: number;
   tags?: Record<string, string>;
 };
 
-type OverpassResponse = {
-  elements?: OverpassElement[];
+type SnapshotFeature = Feature<Point, SnapshotProperties>;
+type SnapshotCollection = FeatureCollection<Point, SnapshotProperties>;
+
+type SnapshotMetadata = {
+  generatedAt?: string;
+  country?: string;
+  strategy?: string;
+  count?: number;
+  exactDisabledParkingSpaces?: number;
+  parkingsWithDisabledCapacity?: number;
 };
 
-class OverpassRequestError extends Error {
-  status: number;
-  details: string;
+let cachedSnapshot: SnapshotCollection | null = null;
+let cachedSnapshotMetadata: SnapshotMetadata | null = null;
 
-  constructor(status: number, details: string) {
-    super("Overpass API request failed");
-    this.status = status;
-    this.details = details;
-  }
-}
-
-const OVERPASS_API_URL =
-  process.env.OVERPASS_API_URL || "https://overpass-api.de/api/interpreter";
-
-const OVERPASS_USER_AGENT =
-  process.env.OVERPASS_USER_AGENT ||
-  "GdzieTaKoperta/0.1 (https://gdzietakoperta.pl)";
-
-const OVERPASS_REFERER =
-  process.env.OVERPASS_REFERER || "https://gdzietakoperta.pl/";
+const MAX_RADIUS_METERS = 5000;
 
 function parseCoordinate(value: string | null, name: string) {
   if (!value) {
@@ -55,13 +63,13 @@ function parseCoordinate(value: string | null, name: string) {
 }
 
 function clampRadius(value: string | null) {
-  const parsed = value ? Number(value) : 5000;
+  const parsed = value ? Number(value) : MAX_RADIUS_METERS;
 
   if (!Number.isFinite(parsed)) {
-    return 5000;
+    return MAX_RADIUS_METERS;
   }
 
-  return Math.min(Math.max(Math.round(parsed), 100), 5000);
+  return Math.min(Math.max(Math.round(parsed), 100), MAX_RADIUS_METERS);
 }
 
 function isValidLatLng(lat: number, lng: number) {
@@ -92,168 +100,6 @@ function haversineMeters(
   );
 }
 
-function getElementPosition(element: OverpassElement) {
-  if (typeof element.lat === "number" && typeof element.lon === "number") {
-    return {
-      lat: element.lat,
-      lng: element.lon
-    };
-  }
-
-  if (
-    element.center &&
-    typeof element.center.lat === "number" &&
-    typeof element.center.lon === "number"
-  ) {
-    return {
-      lat: element.center.lat,
-      lng: element.center.lon
-    };
-  }
-
-  return null;
-}
-
-function getObjectType(tags: Record<string, string>) {
-  if (
-    tags.amenity === "parking_space" &&
-    tags.parking_space === "disabled"
-  ) {
-    return "disabled_parking_space";
-  }
-
-  if (
-    tags.amenity === "parking" &&
-    typeof tags["capacity:disabled"] === "string"
-  ) {
-    return "parking_with_disabled_capacity";
-  }
-
-  return "parking_related";
-}
-
-function toGeoJsonFeature(
-  element: OverpassElement,
-  userLat: number,
-  userLng: number
-) {
-  const position = getElementPosition(element);
-
-  if (!position) {
-    return null;
-  }
-
-  const tags = element.tags || {};
-  const objectType = getObjectType(tags);
-
-  return {
-    type: "Feature" as const,
-    properties: {
-      source: "openstreetmap",
-      sourceStatus: "osm_unverified",
-      objectType,
-      osmType: element.type,
-      osmId: element.id,
-      osmUrl: `https://www.openstreetmap.org/${element.type}/${element.id}`,
-      name: tags.name || null,
-      amenity: tags.amenity || null,
-      parking: tags.parking || null,
-      parkingSpace: tags.parking_space || null,
-      capacity: tags.capacity || null,
-      capacityDisabled: tags["capacity:disabled"] || null,
-      access: tags.access || null,
-      wheelchair: tags.wheelchair || null,
-      surface: tags.surface || null,
-      operator: tags.operator || null,
-      distanceMeters: haversineMeters(
-        userLat,
-        userLng,
-        position.lat,
-        position.lng
-      ),
-      tags
-    },
-    geometry: {
-      type: "Point" as const,
-      coordinates: [position.lng, position.lat]
-    }
-  };
-}
-
-function buildOverpassQuery(lat: number, lng: number, radius: number) {
-  return `
-[out:json][timeout:25];
-(
-  nwr(around:${radius},${lat},${lng})["amenity"="parking"]["capacity:disabled"]["capacity:disabled"!="0"]["capacity:disabled"!="no"];
-  nwr(around:${radius},${lat},${lng})["amenity"="parking_space"]["parking_space"="disabled"];
-);
-out center tags qt;
-`;
-}
-
-async function fetchOverpass(query: string) {
-  const attempts = [
-    {
-      label: "plain-text",
-      body: query,
-      contentType: "text/plain; charset=UTF-8"
-    },
-    {
-      label: "form-data",
-      body: new URLSearchParams({ data: query }),
-      contentType: "application/x-www-form-urlencoded"
-    }
-  ];
-
-  let lastError: OverpassRequestError | null = null;
-
-  for (const attempt of attempts) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
-
-    try {
-      const response = await fetch(OVERPASS_API_URL, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": attempt.contentType,
-          "User-Agent": OVERPASS_USER_AGENT,
-          Referer: OVERPASS_REFERER
-        },
-        body: attempt.body,
-        signal: controller.signal
-      });
-
-      const text = await response.text();
-
-      if (!response.ok) {
-        lastError = new OverpassRequestError(
-          response.status,
-          `[${attempt.label}] ${text.slice(0, 1200)}`
-        );
-        continue;
-      }
-
-      return JSON.parse(text) as OverpassResponse;
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unknown Overpass error";
-
-      lastError = new OverpassRequestError(
-        502,
-        `[${attempt.label}] ${message}`
-      );
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  throw (
-    lastError ||
-    new OverpassRequestError(502, "Overpass request failed without details")
-  );
-}
-
 function jsonError(message: string, status = 400) {
   return NextResponse.json(
     {
@@ -263,6 +109,121 @@ function jsonError(message: string, status = 400) {
       status
     }
   );
+}
+
+function getSnapshotPath() {
+  return path.join(process.cwd(), "public", "data", "disabled-parking.geojson");
+}
+
+function getMetadataPath() {
+  return path.join(
+    process.cwd(),
+    "public",
+    "data",
+    "disabled-parking-metadata.json"
+  );
+}
+
+async function loadSnapshot() {
+  if (cachedSnapshot) {
+    return cachedSnapshot;
+  }
+
+  const filePath = getSnapshotPath();
+  const raw = await readFile(filePath, "utf-8");
+  const parsed = JSON.parse(raw) as SnapshotCollection;
+
+  if (!parsed || parsed.type !== "FeatureCollection" || !Array.isArray(parsed.features)) {
+    throw new Error("Invalid disabled-parking.geojson snapshot");
+  }
+
+  cachedSnapshot = parsed;
+
+  return parsed;
+}
+
+async function loadSnapshotMetadata() {
+  if (cachedSnapshotMetadata) {
+    return cachedSnapshotMetadata;
+  }
+
+  try {
+    const raw = await readFile(getMetadataPath(), "utf-8");
+    cachedSnapshotMetadata = JSON.parse(raw) as SnapshotMetadata;
+    return cachedSnapshotMetadata;
+  } catch {
+    cachedSnapshotMetadata = {};
+    return cachedSnapshotMetadata;
+  }
+}
+
+function getFeatureLatLng(feature: SnapshotFeature) {
+  if (
+    feature.geometry?.type !== "Point" ||
+    !Array.isArray(feature.geometry.coordinates)
+  ) {
+    return null;
+  }
+
+  const [lng, lat] = feature.geometry.coordinates;
+
+  if (
+    typeof lat !== "number" ||
+    typeof lng !== "number" ||
+    !isValidLatLng(lat, lng)
+  ) {
+    return null;
+  }
+
+  return {
+    lat,
+    lng
+  };
+}
+
+function withDistance(
+  feature: SnapshotFeature,
+  userLat: number,
+  userLng: number
+): SnapshotFeature | null {
+  const position = getFeatureLatLng(feature);
+
+  if (!position) {
+    return null;
+  }
+
+  const distanceMeters = haversineMeters(
+    userLat,
+    userLng,
+    position.lat,
+    position.lng
+  );
+
+  return {
+    ...feature,
+    properties: {
+      ...(feature.properties || {}),
+      source: feature.properties?.source || "openstreetmap",
+      sourceStatus: feature.properties?.sourceStatus || "osm_snapshot",
+      distanceMeters
+    }
+  };
+}
+
+function countByType(features: SnapshotFeature[]) {
+  const exactDisabledParkingSpaces = features.filter(
+    (feature) => feature.properties?.objectType === "disabled_parking_space"
+  ).length;
+
+  const parkingsWithDisabledCapacity = features.filter(
+    (feature) =>
+      feature.properties?.objectType === "parking_with_disabled_capacity"
+  ).length;
+
+  return {
+    exactDisabledParkingSpaces,
+    parkingsWithDisabledCapacity
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -277,62 +238,69 @@ export async function GET(request: NextRequest) {
       return jsonError("Invalid latitude or longitude range", 400);
     }
 
-    const query = buildOverpassQuery(lat, lng, radius);
-    const overpassData = await fetchOverpass(query);
+    const [snapshot, snapshotMetadata] = await Promise.all([
+      loadSnapshot(),
+      loadSnapshotMetadata()
+    ]);
 
-    const features = (overpassData.elements || [])
-      .map((element) => toGeoJsonFeature(element, lat, lng))
-      .filter((feature) => feature !== null)
+    const features = snapshot.features
+      .map((feature) => withDistance(feature, lat, lng))
+      .filter((feature): feature is SnapshotFeature => {
+        return Boolean(
+          feature &&
+            typeof feature.properties?.distanceMeters === "number" &&
+            feature.properties.distanceMeters <= radius
+        );
+      })
       .sort((a, b) => {
-        const first = a.properties.distanceMeters;
-        const second = b.properties.distanceMeters;
+        const first = a.properties?.distanceMeters ?? Number.MAX_SAFE_INTEGER;
+        const second = b.properties?.distanceMeters ?? Number.MAX_SAFE_INTEGER;
 
         return first - second;
       });
+
+    const typeCounts = countByType(features);
 
     return NextResponse.json(
       {
         type: "FeatureCollection",
         metadata: {
-          source: "OpenStreetMap via Overpass API",
-          sourceStatus: "unverified_osm_data",
+          source: "OpenStreetMap snapshot generated via OSMnx/Overpass",
+          sourceStatus: "osm_snapshot",
+          mode: "static_snapshot_filter",
+          generatedAt: snapshotMetadata.generatedAt || null,
+          country: snapshotMetadata.country || "Poland",
+          strategy: snapshotMetadata.strategy || "voivodeship-snapshot",
           center: {
             lat,
             lng
           },
           radiusMeters: radius,
           count: features.length,
-          queryTypes: [
-            "amenity=parking + capacity:disabled",
-            "amenity=parking_space + parking_space=disabled"
-          ]
+          snapshotCount: snapshotMetadata.count ?? snapshot.features.length,
+          exactDisabledParkingSpaces:
+            typeCounts.exactDisabledParkingSpaces,
+          parkingsWithDisabledCapacity:
+            typeCounts.parkingsWithDisabledCapacity,
+          snapshotTotals: {
+            exactDisabledParkingSpaces:
+              snapshotMetadata.exactDisabledParkingSpaces ?? null,
+            parkingsWithDisabledCapacity:
+              snapshotMetadata.parkingsWithDisabledCapacity ?? null
+          }
         },
         features
       },
       {
         headers: {
-          "Cache-Control": "s-maxage=900, stale-while-revalidate=3600"
+          "Cache-Control": "s-maxage=3600, stale-while-revalidate=86400"
         }
       }
     );
   } catch (error) {
-    if (error instanceof OverpassRequestError) {
-      return NextResponse.json(
-        {
-          error: error.message,
-          status: error.status,
-          details: error.details
-        },
-        {
-          status: 502
-        }
-      );
-    }
-
     const message =
-      error instanceof Error ? error.message : "Unknown endpoint error";
+      error instanceof Error ? error.message : "Unknown snapshot endpoint error";
 
-    return jsonError(message, 400);
+    return jsonError(message, 500);
   }
 }
-

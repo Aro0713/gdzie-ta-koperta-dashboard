@@ -178,6 +178,7 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
   const [loadingOsm, setLoadingOsm] = useState(false);
   const [addingMode, setAddingMode] = useState(false);
   const [userAddedSpots, setUserAddedSpots] = useState<UserAddedSpot[]>([]);
+  const [showRemoveChooser, setShowRemoveChooser] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -282,6 +283,31 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
     onUserSpotsChange?.(userAddedSpots);
   }, [userAddedSpots, onUserSpotsChange]);
 
+    useEffect(() => {
+    if (userAddedSpots.length === 0 && showRemoveChooser) {
+      setShowRemoveChooser(false);
+    }
+  }, [userAddedSpots.length, showRemoveChooser]);
+
+    function formatUserSpotLabel(spot: UserAddedSpot, index: number) {
+    const safeSpot = spot as UserAddedSpot & {
+      lat?: number;
+      lng?: number;
+      createdAt?: string;
+    };
+
+    const lat =
+      typeof safeSpot.lat === "number" ? safeSpot.lat.toFixed(5) : null;
+    const lng =
+      typeof safeSpot.lng === "number" ? safeSpot.lng.toFixed(5) : null;
+
+    if (lat && lng) {
+      return `Koperta ${index + 1} • ${lat}, ${lng}`;
+    }
+
+    return `Koperta ${index + 1}`;
+  }
+
   function clearOsmLayer() {
     const map = leafletMap.current;
 
@@ -301,6 +327,32 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
       userAddedLayer.current = null;
     }
   }
+
+  function toggleRemoveChooser() {
+  setShowRemoveChooser((current) => !current);
+}
+
+function removeUserSpotByIndex(indexToRemove: number) {
+  const next = userAddedSpots.filter((_, index) => index !== indexToRemove);
+
+  persistLocalUserSpots(next);
+
+  const L = leafletApi.current;
+  const map = leafletMap.current;
+
+  if (L && map) {
+    drawUserAddedSpots(next, L, map);
+  }
+
+  setUserAddedSpots(next);
+  setShowRemoveChooser(next.length > 0);
+
+  setLocationMessage(
+    next.length > 0
+      ? `Usunięto kopertę. Pozostało ${next.length}.`
+      : "Usunięto ostatnią lokalną kopertę."
+  );
+}
 
   function makeOsmMarker(L: LeafletWithCluster, feature: OsmParkingFeature) {
     const coordinates = feature.geometry.coordinates;
@@ -600,18 +652,32 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
         </button>
 
         <button
-          className={`secondary-button add-mode-button ${
-            addingMode ? "add-mode-button-active" : ""
-          }`}
-          onClick={enableAddingMode}
+          className="secondary-button add-mode-button"
+          onClick={() => {
+            setShowRemoveChooser(false);
+            enableAddingMode();
+          }}
           type="button"
+          style={{
+            background: userAddedSpots.length > 0 ? "#1f9d55" : "#d64545",
+            borderColor: userAddedSpots.length > 0 ? "#1f9d55" : "#d64545",
+            color: "#ffffff"
+          }}
         >
-          {addingMode ? "Kliknij miejsce na mapie" : "Dodaj kopertę z mapy"}
+          {addingMode
+            ? "Kliknij miejsce na mapie"
+            : userAddedSpots.length > 0
+              ? "Koperta dodana"
+              : "Dodaj kopertę na mapie"}
         </button>
 
         {userAddedSpots.length > 0 ? (
-          <button className="secondary-button clear-local-button" onClick={clearUserSpots} type="button">
-            Wyczyść moje punkty
+          <button
+            className="secondary-button clear-local-button"
+            onClick={toggleRemoveChooser}
+            type="button"
+          >
+            {showRemoveChooser ? "Zamknij listę kopert" : "Usuń moją kopertę"}
           </button>
         ) : null}
 
@@ -621,11 +687,87 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
         <span className="map-status-pill">P: {parkingOsmCount}</span>
         <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
         <span className="map-status-pill">Razem OSM: {osmCount}</span>
+
+        {showRemoveChooser && userAddedSpots.length > 0 ? (
+          <div
+            style={{
+              width: "100%",
+              marginTop: 12,
+              padding: 14,
+              borderRadius: 16,
+              background: "#ffffff",
+              border: "1px solid rgba(15, 23, 42, 0.08)",
+              boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)"
+            }}
+          >
+            <div
+              style={{
+                fontWeight: 700,
+                fontSize: 16,
+                marginBottom: 10
+              }}
+            >
+              Którą?
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10
+              }}
+            >
+              {userAddedSpots.map((spot, index) => (
+                <div
+                  key={`user-spot-${index}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: 12,
+                    borderRadius: 12,
+                    background: "#f8fafc",
+                    border: "1px solid rgba(15, 23, 42, 0.06)"
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4
+                    }}
+                  >
+                    <strong>{`Koperta ${index + 1}`}</strong>
+                    <span
+                      style={{
+                        fontSize: 13,
+                        color: "#475569"
+                      }}
+                    >
+                      {formatUserSpotLabel(spot, index)}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => removeUserSpotByIndex(index)}
+                    style={{
+                      background: "#b91c1c",
+                      borderColor: "#b91c1c",
+                      color: "#ffffff",
+                      whiteSpace: "nowrap"
+                    }}
+                  >
+                    Usuń
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
 }
-
-
-
-

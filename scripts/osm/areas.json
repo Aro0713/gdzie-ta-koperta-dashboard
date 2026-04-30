@@ -1,0 +1,82 @@
+[
+  {
+    "id": "dolnoslaskie",
+    "name": "Województwo dolnośląskie",
+    "place_query": "województwo dolnośląskie, Polska"
+  },
+  {
+    "id": "kujawsko_pomorskie",
+    "name": "Województwo kujawsko-pomorskie",
+    "place_query": "województwo kujawsko-pomorskie, Polska"
+  },
+  {
+    "id": "lubelskie",
+    "name": "Województwo lubelskie",
+    "place_query": "województwo lubelskie, Polska"
+  },
+  {
+    "id": "lubuskie",
+    "name": "Województwo lubuskie",
+    "place_query": "województwo lubuskie, Polska"
+  },
+  {
+    "id": "lodzkie",
+    "name": "Województwo łódzkie",
+    "place_query": "województwo łódzkie, Polska"
+  },
+  {
+    "id": "malopolskie",
+    "name": "Województwo małopolskie",
+    "place_query": "województwo małopolskie, Polska"
+  },
+  {
+    "id": "mazowieckie",
+    "name": "Województwo mazowieckie",
+    "place_query": "województwo mazowieckie, Polska"
+  },
+  {
+    "id": "opolskie",
+    "name": "Województwo opolskie",
+    "place_query": "województwo opolskie, Polska"
+  },
+  {
+    "id": "podkarpackie",
+    "name": "Województwo podkarpackie",
+    "place_query": "województwo podkarpackie, Polska"
+  },
+  {
+    "id": "podlaskie",
+    "name": "Województwo podlaskie",
+    "place_query": "województwo podlaskie, Polska"
+  },
+  {
+    "id": "pomorskie",
+    "name": "Województwo pomorskie",
+    "place_query": "województwo pomorskie, Polska"
+  },
+  {
+    "id": "slaskie",
+    "name": "Województwo śląskie",
+    "place_query": "województwo śląskie, Polska"
+  },
+  {
+    "id": "swietokrzyskie",
+    "name": "Województwo świętokrzyskie",
+    "place_query": "województwo świętokrzyskie, Polska"
+  },
+  {
+    "id": "warminsko_mazurskie",
+    "name": "Województwo warmińsko-mazurskie",
+    "place_query": "województwo warmińsko-mazurskie, Polska"
+  },
+  {
+    "id": "wielkopolskie",
+    "name": "Województwo wielkopolskie",
+    "place_query": "województwo wielkopolskie, Polska"
+  },
+  {
+    "id": "zachodniopomorskie",
+    "name": "Województwo zachodniopomorskie",
+    "place_query": "województwo zachodniopomorskie, Polska"
+  }
+]
