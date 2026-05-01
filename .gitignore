@@ -13,3 +13,6 @@ pnpm-debug.log*
 
 .venv-osm
 scripts/osm/__pycache__
+
+*.tsbuildinfo
+tsconfig.tsbuildinfo

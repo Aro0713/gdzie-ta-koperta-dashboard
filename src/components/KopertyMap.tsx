@@ -40,6 +40,12 @@ export type UserAddedSpot = {
   confirmations?: number;
 };
 
+type KopertyMapProps = {
+  full?: boolean;
+  onOsmData?: (data: OsmParkingResponse) => void;
+  onUserSpotsChange?: (spots: UserAddedSpot[]) => void;
+};
+
 const SEARCH_RADIUS_METERS = 5000;
 const LOCAL_USER_SPOTS_KEY = "gdzietakoperta.localUserSpots.v1";
 
@@ -101,6 +107,18 @@ function persistLocalUserSpots(spots: UserAddedSpot[]) {
   window.localStorage.setItem(LOCAL_USER_SPOTS_KEY, JSON.stringify(spots));
 }
 
+function formatUserSpotDate(spot: UserAddedSpot) {
+  try {
+    return new Date(spot.createdAt).toLocaleString("pl-PL");
+  } catch {
+    return "brak daty";
+  }
+}
+
+function formatUserSpotGps(spot: UserAddedSpot) {
+  return `${spot.lat.toFixed(6)}, ${spot.lng.toFixed(6)}`;
+}
+
 function buildPopupHtml(properties: OsmParkingProperties) {
   const title = getOsmTitle(properties);
   const capacityDisabled = properties.capacityDisabled || "brak danych";
@@ -135,31 +153,31 @@ function buildPopupHtml(properties: OsmParkingProperties) {
 function buildUserSpotPopupHtml(spot: UserAddedSpot) {
   return `
     <div class="osm-popup">
-      <strong>Zgłoszona koperta</strong>
-      <span>Punkt dodany z mapy przez użytkownika</span>
+      <strong>Koperta dodana przez użytkownika GTK</strong>
+      <span>Punkt lokalny aplikacji GdzieTaKoperta</span>
       <dl>
         <dt>Status</dt>
-        <dd>lokalny szkic</dd>
+        <dd>do sprawdzenia</dd>
+        <dt>Potwierdzenia</dt>
+        <dd>${spot.confirmations || 0} / 5</dd>
         <dt>GPS</dt>
-        <dd>${spot.lat.toFixed(6)}, ${spot.lng.toFixed(6)}</dd>
+        <dd>${escapeHtml(formatUserSpotGps(spot))}</dd>
         <dt>Dodano</dt>
-        <dd>${escapeHtml(new Date(spot.createdAt).toLocaleString("pl-PL"))}</dd>
+        <dd>${escapeHtml(formatUserSpotDate(spot))}</dd>
       </dl>
       <span>
-        Na tym etapie punkt jest zapisany tylko w tej przeglądarce.
-        Następny krok: zapis do Supabase/PostGIS.
+        Ten punkt jest obecnie zapisany lokalnie w tej przeglądarce.
+        Następny etap: zgłoszenie przez OSM Notes/OAuth.
       </span>
     </div>
   `;
 }
 
-type KopertyMapProps = {
-  full?: boolean;
-  onOsmData?: (data: OsmParkingResponse) => void;
-  onUserSpotsChange?: (spots: UserAddedSpot[]) => void;
-};
-
-export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: KopertyMapProps) {
+export function KopertyMap({
+  full = false,
+  onOsmData,
+  onUserSpotsChange
+}: KopertyMapProps) {
   const mapNode = useRef<HTMLDivElement | null>(null);
   const leafletMap = useRef<import("leaflet").Map | null>(null);
   const leafletApi = useRef<LeafletWithCluster | null>(null);
@@ -168,6 +186,7 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
   const osmLayer = useRef<import("leaflet").LayerGroup | null>(null);
   const userAddedLayer = useRef<import("leaflet").LayerGroup | null>(null);
   const userSpotsHydrated = useRef(false);
+  const pendingUserSpotPopupId = useRef<string | null>(null);
 
   const [locationMessage, setLocationMessage] = useState(
     "Mapa gotowa. Pobierz lokalizację, aby zobaczyć koperty w promieniu 5 km."
@@ -177,8 +196,8 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
   const [parkingOsmCount, setParkingOsmCount] = useState(0);
   const [loadingOsm, setLoadingOsm] = useState(false);
   const [addingMode, setAddingMode] = useState(false);
-  const [userAddedSpots, setUserAddedSpots] = useState<UserAddedSpot[]>([]);
   const [showRemoveChooser, setShowRemoveChooser] = useState(false);
+  const [userAddedSpots, setUserAddedSpots] = useState<UserAddedSpot[]>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -277,36 +296,16 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
       return;
     }
 
-    // Synchronizujemy punkty użytkownika po renderze, nie w trakcie setState.
     persistLocalUserSpots(userAddedSpots);
     drawUserAddedSpots(userAddedSpots);
     onUserSpotsChange?.(userAddedSpots);
   }, [userAddedSpots, onUserSpotsChange]);
 
-    useEffect(() => {
+  useEffect(() => {
     if (userAddedSpots.length === 0 && showRemoveChooser) {
       setShowRemoveChooser(false);
     }
   }, [userAddedSpots.length, showRemoveChooser]);
-
-    function formatUserSpotLabel(spot: UserAddedSpot, index: number) {
-    const safeSpot = spot as UserAddedSpot & {
-      lat?: number;
-      lng?: number;
-      createdAt?: string;
-    };
-
-    const lat =
-      typeof safeSpot.lat === "number" ? safeSpot.lat.toFixed(5) : null;
-    const lng =
-      typeof safeSpot.lng === "number" ? safeSpot.lng.toFixed(5) : null;
-
-    if (lat && lng) {
-      return `Koperta ${index + 1} • ${lat}, ${lng}`;
-    }
-
-    return `Koperta ${index + 1}`;
-  }
 
   function clearOsmLayer() {
     const map = leafletMap.current;
@@ -317,9 +316,7 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
     }
   }
 
-  function clearUserAddedLayer(
-    forcedMap?: import("leaflet").Map
-  ) {
+  function clearUserAddedLayer(forcedMap?: import("leaflet").Map) {
     const map = forcedMap || leafletMap.current;
 
     if (map && userAddedLayer.current) {
@@ -327,32 +324,6 @@ export function KopertyMap({ full = false, onOsmData, onUserSpotsChange }: Koper
       userAddedLayer.current = null;
     }
   }
-
-  function toggleRemoveChooser() {
-  setShowRemoveChooser((current) => !current);
-}
-
-function removeUserSpotByIndex(indexToRemove: number) {
-  const next = userAddedSpots.filter((_, index) => index !== indexToRemove);
-
-  persistLocalUserSpots(next);
-
-  const L = leafletApi.current;
-  const map = leafletMap.current;
-
-  if (L && map) {
-    drawUserAddedSpots(next, L, map);
-  }
-
-  setUserAddedSpots(next);
-  setShowRemoveChooser(next.length > 0);
-
-  setLocationMessage(
-    next.length > 0
-      ? `Usunięto kopertę. Pozostało ${next.length}.`
-      : "Usunięto ostatnią lokalną kopertę."
-  );
-}
 
   function makeOsmMarker(L: LeafletWithCluster, feature: OsmParkingFeature) {
     const coordinates = feature.geometry.coordinates;
@@ -424,14 +395,32 @@ function removeUserSpotByIndex(indexToRemove: number) {
 
     clearUserAddedLayer(map);
 
+    if (!spots.length) {
+      userAddedLayer.current = null;
+      return;
+    }
+
     const layer = L.layerGroup();
+    let markerToOpen: import("leaflet").Marker | null = null;
 
     spots.forEach((spot) => {
-      layer.addLayer(makeUserAddedMarker(L, spot));
+      const marker = makeUserAddedMarker(L, spot);
+      layer.addLayer(marker);
+
+      if (pendingUserSpotPopupId.current === spot.id) {
+        markerToOpen = marker;
+      }
     });
 
     layer.addTo(map);
     userAddedLayer.current = layer;
+
+    if (markerToOpen) {
+      window.setTimeout(() => {
+        markerToOpen?.openPopup();
+        pendingUserSpotPopupId.current = null;
+      }, 80);
+    }
   }
 
   function drawOsmFeatures(data: OsmParkingResponse) {
@@ -480,7 +469,7 @@ function removeUserSpotByIndex(indexToRemove: number) {
 
     if (exactCount === 0) {
       setLocationMessage(
-        `OSM znalazł ${parkingCount} parkingów z miejscami dla OzN, ale brak dokładnie naniesionych kopert. Możesz dodać kopertę z mapy.`
+        `OSM znalazł ${parkingCount} parkingów z miejscami dla OzN, ale brak dokładnie naniesionych kopert. Możesz dodać kopertę na mapie.`
       );
     } else {
       setLocationMessage(
@@ -543,19 +532,38 @@ function removeUserSpotByIndex(indexToRemove: number) {
       confirmations: 0
     };
 
+    pendingUserSpotPopupId.current = newSpot.id;
+    setShowRemoveChooser(false);
     setUserAddedSpots((current) => [newSpot, ...current]);
 
     setLocationMessage(
-      "Dodano lokalny punkt koperty. Na razie jest zapisany tylko w tej przeglądarce."
+      "Dodano lokalną kopertę. Punkt jest zapisany w tej przeglądarce i czeka na zgłoszenie do OSM."
     );
   }
 
-  function clearUserSpots() {
-    setUserAddedSpots([]);
-    setLocationMessage("Usunięto lokalne szkice kopert z tej przeglądarki.");
+  function removeUserSpotById(spotId: string) {
+    const removedSpot = userAddedSpots.find((spot) => spot.id === spotId);
+    const next = userAddedSpots.filter((spot) => spot.id !== spotId);
+
+    setUserAddedSpots(next);
+    setShowRemoveChooser(next.length > 0);
+
+    if (removedSpot) {
+      setLocationMessage(
+        `Usunięto kopertę ${removedSpot.lat.toFixed(5)}, ${removedSpot.lng.toFixed(5)}.`
+      );
+    } else {
+      setLocationMessage("Usunięto kopertę.");
+    }
+  }
+
+  function toggleRemoveChooser() {
+    setAddingMode(false);
+    setShowRemoveChooser((current) => !current);
   }
 
   function enableAddingMode() {
+    setShowRemoveChooser(false);
     setAddingMode(true);
     setLocationMessage(
       "Tryb dodawania aktywny: kliknij dokładne miejsce koperty na mapie."
@@ -652,32 +660,26 @@ function removeUserSpotByIndex(indexToRemove: number) {
         </button>
 
         <button
-          className="secondary-button add-mode-button"
-          onClick={() => {
-            setShowRemoveChooser(false);
-            enableAddingMode();
-          }}
+          className={`secondary-button add-koperta-button ${
+            userAddedSpots.length > 0 ? "add-koperta-button-ready" : ""
+          } ${addingMode ? "add-koperta-button-active" : ""}`}
+          onClick={enableAddingMode}
           type="button"
-          style={{
-            background: userAddedSpots.length > 0 ? "#1f9d55" : "#d64545",
-            borderColor: userAddedSpots.length > 0 ? "#1f9d55" : "#d64545",
-            color: "#ffffff"
-          }}
         >
           {addingMode
             ? "Kliknij miejsce na mapie"
             : userAddedSpots.length > 0
-              ? "Koperta dodana"
+              ? "Dodaj kolejną kopertę na mapie"
               : "Dodaj kopertę na mapie"}
         </button>
 
         {userAddedSpots.length > 0 ? (
           <button
-            className="secondary-button clear-local-button"
+            className="secondary-button remove-koperta-button"
             onClick={toggleRemoveChooser}
             type="button"
           >
-            {showRemoveChooser ? "Zamknij listę kopert" : "Usuń moją kopertę"}
+            {showRemoveChooser ? "Zamknij wybór" : "Usuń moją kopertę"}
           </button>
         ) : null}
 
@@ -689,80 +691,47 @@ function removeUserSpotByIndex(indexToRemove: number) {
         <span className="map-status-pill">Razem OSM: {osmCount}</span>
 
         {showRemoveChooser && userAddedSpots.length > 0 ? (
-          <div
-            style={{
-              width: "100%",
-              marginTop: 12,
-              padding: 14,
-              borderRadius: 16,
-              background: "#ffffff",
-              border: "1px solid rgba(15, 23, 42, 0.08)",
-              boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)"
-            }}
-          >
-            <div
-              style={{
-                fontWeight: 700,
-                fontSize: 16,
-                marginBottom: 10
-              }}
-            >
-              Którą?
+          <div className="remove-chooser-card">
+            <div className="remove-chooser-header">
+              <div>
+                <strong>Którą kopertę usunąć?</strong>
+                <span>
+                  Wybierz punkt dodany lokalnie w tej przeglądarce.
+                </span>
+              </div>
+              <span className="remove-chooser-count">
+                {userAddedSpots.length}
+              </span>
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 10
-              }}
-            >
+            <div className="remove-chooser-list">
               {userAddedSpots.map((spot, index) => (
-                <div
-                  key={`user-spot-${index}`}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    padding: 12,
-                    borderRadius: 12,
-                    background: "#f8fafc",
-                    border: "1px solid rgba(15, 23, 42, 0.06)"
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 4
-                    }}
-                  >
-                    <strong>{`Koperta ${index + 1}`}</strong>
-                    <span
-                      style={{
-                        fontSize: 13,
-                        color: "#475569"
-                      }}
-                    >
-                      {formatUserSpotLabel(spot, index)}
+                <article className="remove-chooser-item" key={spot.id}>
+                  <div className="remove-chooser-main">
+                    <span className="remove-chooser-index">
+                      {index + 1}
                     </span>
+
+                    <div>
+                      <h3>Koperta {index + 1}</h3>
+                      <p>{formatUserSpotGps(spot)}</p>
+                      <small>Dodano: {formatUserSpotDate(spot)}</small>
+                    </div>
+                  </div>
+
+                  <div className="remove-chooser-status">
+                    <span>do sprawdzenia</span>
+                    <span>{spot.confirmations || 0} / 5 potwierdzeń</span>
                   </div>
 
                   <button
                     type="button"
-                    className="secondary-button"
-                    onClick={() => removeUserSpotByIndex(index)}
-                    style={{
-                      background: "#b91c1c",
-                      borderColor: "#b91c1c",
-                      color: "#ffffff",
-                      whiteSpace: "nowrap"
-                    }}
+                    className="remove-single-button"
+                    onClick={() => removeUserSpotById(spot.id)}
                   >
-                    Usuń
+                    Usuń tę kopertę
                   </button>
-                </div>
+                </article>
               ))}
             </div>
           </div>
