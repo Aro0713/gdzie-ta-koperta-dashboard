@@ -31,13 +31,28 @@ type LeafletWithCluster = LeafletBase & {
   ) => import("leaflet").LayerGroup;
 };
 
+type OsmMeResponse = {
+  authenticated: boolean;
+  user?: {
+    id?: number;
+    displayName?: string;
+    accountCreated?: string;
+  };
+  scope?: string;
+};
+
 export type UserAddedSpot = {
   id: string;
   lat: number;
   lng: number;
   createdAt: string;
+  editedAt?: string;
   status: "local_draft";
   confirmations?: number;
+  addedByName?: string;
+  addedByOsmId?: number;
+  lastConfirmedByName?: string;
+  lastConfirmedAt?: string;
 };
 
 type KopertyMapProps = {
@@ -117,6 +132,18 @@ function formatUserSpotDate(spot: UserAddedSpot) {
   }
 }
 
+function formatUserSpotEditedDate(spot: UserAddedSpot) {
+  if (!spot.editedAt) {
+    return null;
+  }
+
+  try {
+    return new Date(spot.editedAt).toLocaleString("pl-PL");
+  } catch {
+    return null;
+  }
+}
+
 function formatUserSpotGps(spot: UserAddedSpot) {
   return `${spot.lat.toFixed(6)}, ${spot.lng.toFixed(6)}`;
 }
@@ -169,23 +196,71 @@ function buildPopupHtml(properties: OsmParkingProperties) {
 }
 
 function buildUserSpotPopupHtml(spot: UserAddedSpot) {
+  const addedBy = spot.addedByName || "użytkownik lokalny";
+  const editedDate = formatUserSpotEditedDate(spot);
+  const confirmations = spot.confirmations || 0;
+
   return `
-    <div class="osm-popup">
+    <div class="osm-popup gtk-popup">
       <strong>Szkic koperty GTK</strong>
       <span>Lokalny szkic – jeszcze nie zapisano w OSM</span>
       <dl>
         <dt>Status</dt>
         <dd>do wysłania do OSM</dd>
-        <dt>Potwierdzenia</dt>
-        <dd>${spot.confirmations || 0} / 5</dd>
-        <dt>GPS</dt>
-        <dd>${escapeHtml(formatUserSpotGps(spot))}</dd>
+        <dt>Dodane przez</dt>
+        <dd>${escapeHtml(addedBy)}</dd>
         <dt>Dodano</dt>
         <dd>${escapeHtml(formatUserSpotDate(spot))}</dd>
+        ${
+          editedDate
+            ? `<dt>Edytowano</dt><dd>${escapeHtml(editedDate)}</dd>`
+            : ""
+        }
+        <dt>Potwierdzenia</dt>
+        <dd>${confirmations} / 5</dd>
+        ${
+          spot.lastConfirmedByName
+            ? `<dt>Ostatnio potwierdził</dt><dd>${escapeHtml(
+                spot.lastConfirmedByName
+              )}</dd>`
+            : ""
+        }
+        <dt>GPS</dt>
+        <dd>${escapeHtml(formatUserSpotGps(spot))}</dd>
       </dl>
+
+      <div class="gtk-popup-actions">
+        <button
+          type="button"
+          class="gtk-popup-button gtk-popup-button-confirm"
+          data-gtk-spot-action="confirm"
+          data-gtk-spot-id="${escapeHtml(spot.id)}"
+        >
+          Potwierdź
+        </button>
+
+        <button
+          type="button"
+          class="gtk-popup-button gtk-popup-button-edit"
+          data-gtk-spot-action="edit"
+          data-gtk-spot-id="${escapeHtml(spot.id)}"
+        >
+          Edytuj położenie
+        </button>
+
+        <button
+          type="button"
+          class="gtk-popup-button gtk-popup-button-delete"
+          data-gtk-spot-action="delete"
+          data-gtk-spot-id="${escapeHtml(spot.id)}"
+        >
+          Usuń
+        </button>
+      </div>
+
       <span>
         Ten punkt jest zapisany tylko lokalnie w tej przeglądarce.
-        Następny etap: wysłanie zgłoszenia do OSM z konta użytkownika.
+        Następny etap: wysłanie do OSM z konta użytkownika.
       </span>
     </div>
   `;
@@ -215,9 +290,36 @@ export function KopertyMap({
   const [parkingOsmCount, setParkingOsmCount] = useState(0);
   const [loadingOsm, setLoadingOsm] = useState(false);
   const [addingMode, setAddingMode] = useState(false);
+  const [editingSpotId, setEditingSpotId] = useState<string | null>(null);
   const [radiusMeters, setRadiusMeters] = useState(DEFAULT_SEARCH_RADIUS_METERS);
   const [userAddedSpots, setUserAddedSpots] = useState<UserAddedSpot[]>([]);
   const [showRemoveChooser, setShowRemoveChooser] = useState(false);
+  const [osmUser, setOsmUser] = useState<NonNullable<OsmMeResponse["user"]> | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadOsmUser() {
+      try {
+        const response = await fetch("/api/osm/auth/me");
+        const data = (await response.json()) as OsmMeResponse;
+
+        if (mounted && data.authenticated && data.user) {
+          setOsmUser(data.user);
+        }
+      } catch {
+        if (mounted) {
+          setOsmUser(null);
+        }
+      }
+    }
+
+    void loadOsmUser();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -312,6 +414,69 @@ export function KopertyMap({
   }, [addingMode]);
 
   useEffect(() => {
+    if (!editingSpotId) {
+      return;
+    }
+
+    const map = leafletMap.current;
+
+    if (!map) {
+      return;
+    }
+
+    const handleClick = (event: import("leaflet").LeafletMouseEvent) => {
+      moveUserSpot(editingSpotId, event.latlng.lat, event.latlng.lng);
+      setEditingSpotId(null);
+    };
+
+    map.on("click", handleClick);
+
+    return () => {
+      map.off("click", handleClick);
+    };
+  }, [editingSpotId]);
+
+  useEffect(() => {
+    const handlePopupAction = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      const button = target?.closest<HTMLButtonElement>(
+        "[data-gtk-spot-action]"
+      );
+
+      if (!button) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const action = button.dataset.gtkSpotAction;
+      const spotId = button.dataset.gtkSpotId;
+
+      if (!spotId) {
+        return;
+      }
+
+      if (action === "confirm") {
+        confirmUserSpotById(spotId);
+      }
+
+      if (action === "edit") {
+        startEditingUserSpot(spotId);
+      }
+
+      if (action === "delete") {
+        removeUserSpotById(spotId);
+      }
+    };
+
+    document.addEventListener("click", handlePopupAction);
+
+    return () => {
+      document.removeEventListener("click", handlePopupAction);
+    };
+  });
+
+  useEffect(() => {
     if (!userSpotsHydrated.current) {
       return;
     }
@@ -376,11 +541,14 @@ export function KopertyMap({
 
   function makeUserAddedMarker(L: LeafletWithCluster, spot: UserAddedSpot) {
     const icon = L.divIcon({
-      className: "user-added-marker",
-      html: "<span>＋</span>",
-      iconSize: [38, 38],
-      iconAnchor: [19, 19],
-      popupAnchor: [0, -16]
+      className: "user-added-marker gtk-local-marker",
+      html: `
+        <span class="gtk-marker-icon">♿</span>
+        <small class="gtk-marker-label">GTK</small>
+      `,
+      iconSize: [46, 46],
+      iconAnchor: [23, 23],
+      popupAnchor: [0, -18]
     });
 
     return L.marker([spot.lat, spot.lng], { icon }).bindPopup(
@@ -593,15 +761,75 @@ export function KopertyMap({
       lng,
       createdAt: new Date().toISOString(),
       status: "local_draft",
-      confirmations: 0
+      confirmations: 0,
+      addedByName: osmUser?.displayName || "użytkownik lokalny",
+      addedByOsmId: osmUser?.id
     };
 
     pendingUserSpotPopupId.current = newSpot.id;
     setShowRemoveChooser(false);
+    setEditingSpotId(null);
     setUserAddedSpots((current) => [newSpot, ...current]);
 
     setLocationMessage(
       "Dodano szkic koperty lokalnie. Punkt jest zapisany tylko w tej przeglądarce i czeka na wysłanie do OSM."
+    );
+  }
+
+  function confirmUserSpotById(spotId: string) {
+    pendingUserSpotPopupId.current = spotId;
+
+    setUserAddedSpots((current) =>
+      current.map((spot) => {
+        if (spot.id !== spotId) {
+          return spot;
+        }
+
+        const nextConfirmations = Math.min((spot.confirmations || 0) + 1, 5);
+
+        return {
+          ...spot,
+          confirmations: nextConfirmations,
+          lastConfirmedByName: osmUser?.displayName || "użytkownik lokalny",
+          lastConfirmedAt: new Date().toISOString()
+        };
+      })
+    );
+
+    setLocationMessage(
+      "Potwierdzono lokalny szkic koperty. To nadal nie jest wpis w OSM."
+    );
+  }
+
+  function startEditingUserSpot(spotId: string) {
+    setAddingMode(false);
+    setShowRemoveChooser(false);
+    setEditingSpotId(spotId);
+    setLocationMessage(
+      "Tryb edycji aktywny: kliknij nowe, dokładne położenie tej koperty na mapie."
+    );
+  }
+
+  function moveUserSpot(spotId: string, lat: number, lng: number) {
+    pendingUserSpotPopupId.current = spotId;
+
+    setUserAddedSpots((current) =>
+      current.map((spot) => {
+        if (spot.id !== spotId) {
+          return spot;
+        }
+
+        return {
+          ...spot,
+          lat,
+          lng,
+          editedAt: new Date().toISOString()
+        };
+      })
+    );
+
+    setLocationMessage(
+      "Zmieniono położenie lokalnego szkicu koperty. Zmiana nadal nie jest zapisana w OSM."
     );
   }
 
@@ -611,6 +839,7 @@ export function KopertyMap({
 
     setUserAddedSpots(next);
     setShowRemoveChooser(next.length > 0);
+    setEditingSpotId(null);
 
     if (removedSpot) {
       setLocationMessage(
@@ -625,11 +854,13 @@ export function KopertyMap({
 
   function toggleRemoveChooser() {
     setAddingMode(false);
+    setEditingSpotId(null);
     setShowRemoveChooser((current) => !current);
   }
 
   function enableAddingMode() {
     setShowRemoveChooser(false);
+    setEditingSpotId(null);
     setAddingMode(true);
     setLocationMessage(
       "Tryb dodawania aktywny: kliknij dokładne miejsce koperty na mapie. To utworzy lokalny szkic, nie wpis w OSM."
@@ -718,7 +949,9 @@ export function KopertyMap({
     <div className={`map-shell ${full ? "map-shell-full" : ""}`}>
       <div
         ref={mapNode}
-        className={`map-node ${addingMode ? "map-node-adding" : ""}`}
+        className={`map-node ${
+          addingMode || editingSpotId ? "map-node-adding" : ""
+        }`}
         aria-label="Mapa kopert"
       />
 
@@ -807,9 +1040,11 @@ export function KopertyMap({
           </div>
 
           <div className="map-toolbar-message">
-            {addingMode
-              ? "Tryb dodawania aktywny. Kliknij dokładne miejsce koperty na mapie."
-              : locationMessage}
+            {editingSpotId
+              ? "Tryb edycji aktywny. Kliknij nowe położenie koperty na mapie."
+              : addingMode
+                ? "Tryb dodawania aktywny. Kliknij dokładne miejsce koperty na mapie."
+                : locationMessage}
           </div>
         </div>
 
@@ -839,6 +1074,7 @@ export function KopertyMap({
                       <h3>Szkic koperty {index + 1}</h3>
                       <p>{formatUserSpotGps(spot)}</p>
                       <small>Dodano: {formatUserSpotDate(spot)}</small>
+                      <small>Autor: {spot.addedByName || "użytkownik lokalny"}</small>
                     </div>
                   </div>
 
@@ -847,13 +1083,31 @@ export function KopertyMap({
                     <span>{spot.confirmations || 0} / 5 potwierdzeń</span>
                   </div>
 
-                  <button
-                    type="button"
-                    className="remove-single-button"
-                    onClick={() => removeUserSpotById(spot.id)}
-                  >
-                    Usuń tę kopertę
-                  </button>
+                  <div className="remove-chooser-actions">
+                    <button
+                      type="button"
+                      className="confirm-single-button"
+                      onClick={() => confirmUserSpotById(spot.id)}
+                    >
+                      Potwierdź
+                    </button>
+
+                    <button
+                      type="button"
+                      className="edit-single-button"
+                      onClick={() => startEditingUserSpot(spot.id)}
+                    >
+                      Edytuj
+                    </button>
+
+                    <button
+                      type="button"
+                      className="remove-single-button"
+                      onClick={() => removeUserSpotById(spot.id)}
+                    >
+                      Usuń
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>
