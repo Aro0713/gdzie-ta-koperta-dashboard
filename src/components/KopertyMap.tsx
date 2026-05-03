@@ -46,7 +46,9 @@ type KopertyMapProps = {
   onUserSpotsChange?: (spots: UserAddedSpot[]) => void;
 };
 
-const SEARCH_RADIUS_METERS = 5000;
+const MIN_SEARCH_RADIUS_METERS = 100;
+const MAX_SEARCH_RADIUS_METERS = 5000;
+const DEFAULT_SEARCH_RADIUS_METERS = 5000;
 const LOCAL_USER_SPOTS_KEY = "gdzietakoperta.localUserSpots.v1";
 
 function normalizeLeaflet(module: LeafletModuleWithMaybeDefault) {
@@ -119,6 +121,22 @@ function formatUserSpotGps(spot: UserAddedSpot) {
   return `${spot.lat.toFixed(6)}, ${spot.lng.toFixed(6)}`;
 }
 
+function clampRadius(value: number) {
+  return Math.max(
+    MIN_SEARCH_RADIUS_METERS,
+    Math.min(MAX_SEARCH_RADIUS_METERS, value)
+  );
+}
+
+function formatRadiusLabel(value: number) {
+  if (value >= 1000) {
+    const km = value / 1000;
+    return `${Number.isInteger(km) ? km : km.toFixed(1)} km`;
+  }
+
+  return `${value} m`;
+}
+
 function buildPopupHtml(properties: OsmParkingProperties) {
   const title = getOsmTitle(properties);
   const capacityDisabled = properties.capacityDisabled || "brak danych";
@@ -153,11 +171,11 @@ function buildPopupHtml(properties: OsmParkingProperties) {
 function buildUserSpotPopupHtml(spot: UserAddedSpot) {
   return `
     <div class="osm-popup">
-      <strong>Koperta dodana przez użytkownika GTK</strong>
-      <span>Punkt lokalny aplikacji GdzieTaKoperta</span>
+      <strong>Szkic koperty GTK</strong>
+      <span>Lokalny szkic – jeszcze nie zapisano w OSM</span>
       <dl>
         <dt>Status</dt>
-        <dd>do sprawdzenia</dd>
+        <dd>do wysłania do OSM</dd>
         <dt>Potwierdzenia</dt>
         <dd>${spot.confirmations || 0} / 5</dd>
         <dt>GPS</dt>
@@ -166,8 +184,8 @@ function buildUserSpotPopupHtml(spot: UserAddedSpot) {
         <dd>${escapeHtml(formatUserSpotDate(spot))}</dd>
       </dl>
       <span>
-        Ten punkt jest obecnie zapisany lokalnie w tej przeglądarce.
-        Następny etap: zgłoszenie przez OSM Notes/OAuth.
+        Ten punkt jest zapisany tylko lokalnie w tej przeglądarce.
+        Następny etap: wysłanie zgłoszenia do OSM z konta użytkownika.
       </span>
     </div>
   `;
@@ -187,17 +205,19 @@ export function KopertyMap({
   const userAddedLayer = useRef<import("leaflet").LayerGroup | null>(null);
   const userSpotsHydrated = useRef(false);
   const pendingUserSpotPopupId = useRef<string | null>(null);
+  const userPosition = useRef<{ lat: number; lng: number } | null>(null);
 
   const [locationMessage, setLocationMessage] = useState(
-    "Mapa gotowa. Pobierz lokalizację, aby zobaczyć koperty w promieniu 5 km."
+    "Mapa gotowa. Pobierz lokalizację, aby zobaczyć koperty w wybranym promieniu."
   );
   const [osmCount, setOsmCount] = useState(0);
   const [exactOsmCount, setExactOsmCount] = useState(0);
   const [parkingOsmCount, setParkingOsmCount] = useState(0);
   const [loadingOsm, setLoadingOsm] = useState(false);
   const [addingMode, setAddingMode] = useState(false);
-  const [showRemoveChooser, setShowRemoveChooser] = useState(false);
+  const [radiusMeters, setRadiusMeters] = useState(DEFAULT_SEARCH_RADIUS_METERS);
   const [userAddedSpots, setUserAddedSpots] = useState<UserAddedSpot[]>([]);
+  const [showRemoveChooser, setShowRemoveChooser] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -438,7 +458,9 @@ export function KopertyMap({
       setExactOsmCount(0);
       setParkingOsmCount(0);
       setLocationMessage(
-        "Nie znaleziono oznaczonych kopert w OSM w promieniu 5 km. To może oznaczać brak danych, nie brak miejsc."
+        `Nie znaleziono oznaczonych kopert w OSM w promieniu ${formatRadiusLabel(
+          radiusMeters
+        )}. To może oznaczać brak danych, nie brak miejsc.`
       );
       return;
     }
@@ -469,24 +491,38 @@ export function KopertyMap({
 
     if (exactCount === 0) {
       setLocationMessage(
-        `OSM znalazł ${parkingCount} parkingów z miejscami dla OzN, ale brak dokładnie naniesionych kopert. Możesz dodać kopertę na mapie.`
+        `OSM znalazł ${parkingCount} parkingów z miejscami dla OzN w promieniu ${formatRadiusLabel(
+          radiusMeters
+        )}, ale brak dokładnie naniesionych kopert. Możesz dodać szkic koperty na mapie.`
       );
     } else {
       setLocationMessage(
-        `Znaleziono ${exactCount} dokładnych kopert i ${parkingCount} parkingów z informacją o miejscach dla OzN.`
+        `Znaleziono ${exactCount} dokładnych kopert i ${parkingCount} parkingów z informacją o miejscach dla OzN w promieniu ${formatRadiusLabel(
+          radiusMeters
+        )}.`
       );
     }
   }
 
-  async function fetchOsmParking(lat: number, lng: number) {
+  async function fetchOsmParking(
+    lat: number,
+    lng: number,
+    radius = radiusMeters
+  ) {
+    const safeRadius = clampRadius(radius);
+
     setLoadingOsm(true);
-    setLocationMessage("Filtruję snapshot OpenStreetMap dla promienia 5 km…");
+    setLocationMessage(
+      `Filtruję snapshot OpenStreetMap dla promienia ${formatRadiusLabel(
+        safeRadius
+      )}…`
+    );
 
     try {
       const params = new URLSearchParams({
         lat: String(lat),
         lng: String(lng),
-        radius: String(SEARCH_RADIUS_METERS)
+        radius: String(safeRadius)
       });
 
       const response = await fetch(`/api/osm/parking?${params.toString()}`);
@@ -514,12 +550,40 @@ export function KopertyMap({
         features: [],
         metadata: {
           count: 0,
-          radiusMeters: SEARCH_RADIUS_METERS
+          radiusMeters: safeRadius
         }
       });
     } finally {
       setLoadingOsm(false);
     }
+  }
+
+  function updateVisibleRadius(radius: number) {
+    const safeRadius = clampRadius(radius);
+    const map = leafletMap.current;
+
+    if (!map || !userCircle.current) {
+      return;
+    }
+
+    userCircle.current.setRadius(safeRadius);
+
+    map.fitBounds(userCircle.current.getBounds(), {
+      padding: [24, 24]
+    });
+  }
+
+  function refreshForRadius(radius: number) {
+    const safeRadius = clampRadius(radius);
+    const position = userPosition.current;
+
+    if (!position) {
+      locateUserAndLoadOsm(safeRadius);
+      return;
+    }
+
+    updateVisibleRadius(safeRadius);
+    void fetchOsmParking(position.lat, position.lng, safeRadius);
   }
 
   function addUserSpot(lat: number, lng: number) {
@@ -537,7 +601,7 @@ export function KopertyMap({
     setUserAddedSpots((current) => [newSpot, ...current]);
 
     setLocationMessage(
-      "Dodano lokalną kopertę. Punkt jest zapisany w tej przeglądarce i czeka na zgłoszenie do OSM."
+      "Dodano szkic koperty lokalnie. Punkt jest zapisany tylko w tej przeglądarce i czeka na wysłanie do OSM."
     );
   }
 
@@ -550,10 +614,12 @@ export function KopertyMap({
 
     if (removedSpot) {
       setLocationMessage(
-        `Usunięto kopertę ${removedSpot.lat.toFixed(5)}, ${removedSpot.lng.toFixed(5)}.`
+        `Usunięto szkic koperty ${removedSpot.lat.toFixed(
+          5
+        )}, ${removedSpot.lng.toFixed(5)}.`
       );
     } else {
-      setLocationMessage("Usunięto kopertę.");
+      setLocationMessage("Usunięto szkic koperty.");
     }
   }
 
@@ -566,13 +632,14 @@ export function KopertyMap({
     setShowRemoveChooser(false);
     setAddingMode(true);
     setLocationMessage(
-      "Tryb dodawania aktywny: kliknij dokładne miejsce koperty na mapie."
+      "Tryb dodawania aktywny: kliknij dokładne miejsce koperty na mapie. To utworzy lokalny szkic, nie wpis w OSM."
     );
   }
 
-  function locateUserAndLoadOsm() {
+  function locateUserAndLoadOsm(radiusOverride?: number) {
     const L = leafletApi.current;
     const map = leafletMap.current;
+    const safeRadius = clampRadius(radiusOverride ?? radiusMeters);
 
     if (!L || !map) {
       return;
@@ -585,12 +652,18 @@ export function KopertyMap({
       return;
     }
 
+    setRadiusMeters(safeRadius);
     setLocationMessage("Czekam na zgodę na lokalizację urządzenia…");
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
+
+        userPosition.current = {
+          lat,
+          lng
+        };
 
         if (userMarker.current) {
           userMarker.current.setLatLng([lat, lng]);
@@ -609,10 +682,10 @@ export function KopertyMap({
 
         if (userCircle.current) {
           userCircle.current.setLatLng([lat, lng]);
-          userCircle.current.setRadius(SEARCH_RADIUS_METERS);
+          userCircle.current.setRadius(safeRadius);
         } else {
           userCircle.current = L.circle([lat, lng], {
-            radius: SEARCH_RADIUS_METERS,
+            radius: safeRadius,
             color: "#1477d4",
             weight: 2,
             opacity: 0.75,
@@ -626,7 +699,7 @@ export function KopertyMap({
           padding: [24, 24]
         });
 
-        void fetchOsmParking(lat, lng);
+        void fetchOsmParking(lat, lng, safeRadius);
       },
       () => {
         setLocationMessage(
@@ -649,46 +722,96 @@ export function KopertyMap({
         aria-label="Mapa kopert"
       />
 
-      <div className="map-toolbar map-toolbar-expanded" aria-live="polite">
-        <button
-          className="secondary-button"
-          onClick={locateUserAndLoadOsm}
-          type="button"
-          disabled={loadingOsm}
-        >
-          {loadingOsm ? "Szukam…" : "Pokaż obszar 5 km"}
-        </button>
+      <div className="map-toolbar map-toolbar-modern" aria-live="polite">
+        <div className="map-toolbar-top">
+          <div className="map-toolbar-actions">
+            <button
+              className="map-btn map-btn-neutral"
+              onClick={() => locateUserAndLoadOsm(radiusMeters)}
+              type="button"
+              disabled={loadingOsm}
+            >
+              {loadingOsm ? "Szukam…" : "Pobierz lokalizację"}
+            </button>
 
-        <button
-          className={`secondary-button add-koperta-button ${
-            userAddedSpots.length > 0 ? "add-koperta-button-ready" : ""
-          } ${addingMode ? "add-koperta-button-active" : ""}`}
-          onClick={enableAddingMode}
-          type="button"
-        >
-          {addingMode
-            ? "Kliknij miejsce na mapie"
-            : userAddedSpots.length > 0
-              ? "Dodaj kolejną kopertę na mapie"
-              : "Dodaj kopertę na mapie"}
-        </button>
+            <button
+              className={`map-btn map-btn-add ${
+                addingMode ? "map-btn-add-active" : ""
+              } ${userAddedSpots.length > 0 ? "map-btn-add-ready" : ""}`}
+              onClick={enableAddingMode}
+              type="button"
+            >
+              {addingMode
+                ? "Kliknij miejsce na mapie"
+                : userAddedSpots.length > 0
+                  ? "Dodaj kolejną kopertę na mapie"
+                  : "Dodaj kopertę na mapie"}
+            </button>
 
-        {userAddedSpots.length > 0 ? (
-          <button
-            className="secondary-button remove-koperta-button"
-            onClick={toggleRemoveChooser}
-            type="button"
-          >
-            {showRemoveChooser ? "Zamknij wybór" : "Usuń moją kopertę"}
-          </button>
-        ) : null}
+            {userAddedSpots.length > 0 ? (
+              <button
+                className="map-btn map-btn-danger"
+                onClick={toggleRemoveChooser}
+                type="button"
+              >
+                {showRemoveChooser ? "Zamknij wybór" : "Usuń moją kopertę"}
+              </button>
+            ) : null}
+          </div>
 
-        <span>{locationMessage}</span>
+          <div className="map-toolbar-chips">
+            <span className="map-status-pill">♿ OSM: {exactOsmCount}</span>
+            <span className="map-status-pill">P: {parkingOsmCount}</span>
+            <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
+            <span className="map-status-pill">Razem OSM: {osmCount}</span>
+          </div>
+        </div>
 
-        <span className="map-status-pill">♿ OSM: {exactOsmCount}</span>
-        <span className="map-status-pill">P: {parkingOsmCount}</span>
-        <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
-        <span className="map-status-pill">Razem OSM: {osmCount}</span>
+        <div className="map-toolbar-bottom">
+          <div className="map-radius-card">
+            <div className="map-radius-header">
+              <span className="map-radius-title">Obszar wyszukiwania</span>
+              <strong className="map-radius-value">
+                {formatRadiusLabel(radiusMeters)}
+              </strong>
+            </div>
+
+            <input
+              type="range"
+              min={MIN_SEARCH_RADIUS_METERS}
+              max={MAX_SEARCH_RADIUS_METERS}
+              step={100}
+              value={radiusMeters}
+              className="map-radius-slider"
+              onChange={(event) => {
+                const next = clampRadius(Number(event.target.value));
+                setRadiusMeters(next);
+                updateVisibleRadius(next);
+              }}
+              onMouseUp={(event) => {
+                const next = clampRadius(Number(event.currentTarget.value));
+                refreshForRadius(next);
+              }}
+              onTouchEnd={(event) => {
+                const next = clampRadius(Number(event.currentTarget.value));
+                refreshForRadius(next);
+              }}
+            />
+
+            <div className="map-radius-scale">
+              <span>100 m</span>
+              <span>1 km</span>
+              <span>2,5 km</span>
+              <span>5 km</span>
+            </div>
+          </div>
+
+          <div className="map-toolbar-message">
+            {addingMode
+              ? "Tryb dodawania aktywny. Kliknij dokładne miejsce koperty na mapie."
+              : locationMessage}
+          </div>
+        </div>
 
         {showRemoveChooser && userAddedSpots.length > 0 ? (
           <div className="remove-chooser-card">
@@ -696,7 +819,7 @@ export function KopertyMap({
               <div>
                 <strong>Którą kopertę usunąć?</strong>
                 <span>
-                  Wybierz punkt dodany lokalnie w tej przeglądarce.
+                  Wybierz lokalny szkic zapisany w tej przeglądarce.
                 </span>
               </div>
               <span className="remove-chooser-count">
@@ -713,14 +836,14 @@ export function KopertyMap({
                     </span>
 
                     <div>
-                      <h3>Koperta {index + 1}</h3>
+                      <h3>Szkic koperty {index + 1}</h3>
                       <p>{formatUserSpotGps(spot)}</p>
                       <small>Dodano: {formatUserSpotDate(spot)}</small>
                     </div>
                   </div>
 
                   <div className="remove-chooser-status">
-                    <span>do sprawdzenia</span>
+                    <span>lokalny szkic</span>
                     <span>{spot.confirmations || 0} / 5 potwierdzeń</span>
                   </div>
 
