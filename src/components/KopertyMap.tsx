@@ -41,13 +41,28 @@ type OsmMeResponse = {
   scope?: string;
 };
 
+type SendToOsmResponse = {
+  ok?: boolean;
+  nodeId?: string;
+  changesetId?: string;
+  osmUrl?: string;
+  message?: string;
+  error?: string;
+  details?: unknown;
+};
+
 export type UserAddedSpot = {
   id: string;
   lat: number;
   lng: number;
   createdAt: string;
   editedAt?: string;
-  status: "local_draft";
+  submittedAt?: string;
+  submittedByName?: string;
+  osmNodeId?: string;
+  osmChangesetId?: string;
+  osmUrl?: string;
+  status: "local_draft" | "osm_submitted";
   confirmations?: number;
   addedByName?: string;
   addedByOsmId?: number;
@@ -144,6 +159,18 @@ function formatUserSpotEditedDate(spot: UserAddedSpot) {
   }
 }
 
+function formatSubmittedDate(spot: UserAddedSpot) {
+  if (!spot.submittedAt) {
+    return null;
+  }
+
+  try {
+    return new Date(spot.submittedAt).toLocaleString("pl-PL");
+  } catch {
+    return null;
+  }
+}
+
 function formatUserSpotGps(spot: UserAddedSpot) {
   return `${spot.lat.toFixed(6)}, ${spot.lng.toFixed(6)}`;
 }
@@ -195,18 +222,28 @@ function buildPopupHtml(properties: OsmParkingProperties) {
   `;
 }
 
-function buildUserSpotPopupHtml(spot: UserAddedSpot) {
+function buildUserSpotPopupHtml(
+  spot: UserAddedSpot,
+  isOsmAuthenticated: boolean,
+  isSending: boolean
+) {
   const addedBy = spot.addedByName || "użytkownik lokalny";
   const editedDate = formatUserSpotEditedDate(spot);
+  const submittedDate = formatSubmittedDate(spot);
   const confirmations = spot.confirmations || 0;
+  const isSubmitted = spot.status === "osm_submitted" && Boolean(spot.osmUrl);
 
   return `
     <div class="osm-popup gtk-popup">
-      <strong>Szkic koperty GTK</strong>
-      <span>Lokalny szkic – jeszcze nie zapisano w OSM</span>
+      <strong>${isSubmitted ? "Koperta wysłana do OSM" : "Szkic koperty GTK"}</strong>
+      <span>${
+        isSubmitted
+          ? "Edycja została wysłana do OpenStreetMap"
+          : "Lokalny szkic – jeszcze nie zapisano w OSM"
+      }</span>
       <dl>
         <dt>Status</dt>
-        <dd>do wysłania do OSM</dd>
+        <dd>${isSubmitted ? "wysłano do OSM" : "do wysłania do OSM"}</dd>
         <dt>Dodane przez</dt>
         <dd>${escapeHtml(addedBy)}</dd>
         <dt>Dodano</dt>
@@ -214,6 +251,11 @@ function buildUserSpotPopupHtml(spot: UserAddedSpot) {
         ${
           editedDate
             ? `<dt>Edytowano</dt><dd>${escapeHtml(editedDate)}</dd>`
+            : ""
+        }
+        ${
+          submittedDate
+            ? `<dt>Wysłano do OSM</dt><dd>${escapeHtml(submittedDate)}</dd>`
             : ""
         }
         <dt>Potwierdzenia</dt>
@@ -230,23 +272,43 @@ function buildUserSpotPopupHtml(spot: UserAddedSpot) {
       </dl>
 
       <div class="gtk-popup-actions">
-        <button
-          type="button"
-          class="gtk-popup-button gtk-popup-button-confirm"
-          data-gtk-spot-action="confirm"
-          data-gtk-spot-id="${escapeHtml(spot.id)}"
-        >
-          Potwierdź
-        </button>
+        ${
+          isSubmitted && spot.osmUrl
+            ? `<a class="gtk-popup-link gtk-popup-link-osm" href="${escapeHtml(
+                spot.osmUrl
+              )}" target="_blank" rel="noreferrer">Zobacz w OSM</a>`
+            : `<button
+                type="button"
+                class="gtk-popup-button gtk-popup-button-osm"
+                data-gtk-spot-action="${isOsmAuthenticated ? "send-osm" : "login-osm"}"
+                data-gtk-spot-id="${escapeHtml(spot.id)}"
+                ${isSending ? "disabled" : ""}
+              >
+                ${isSending ? "Wysyłam…" : isOsmAuthenticated ? "Wyślij do OSM" : "Zaloguj OSM"}
+              </button>`
+        }
 
-        <button
-          type="button"
-          class="gtk-popup-button gtk-popup-button-edit"
-          data-gtk-spot-action="edit"
-          data-gtk-spot-id="${escapeHtml(spot.id)}"
-        >
-          Edytuj położenie
-        </button>
+        ${
+          !isSubmitted
+            ? `<button
+                type="button"
+                class="gtk-popup-button gtk-popup-button-confirm"
+                data-gtk-spot-action="confirm"
+                data-gtk-spot-id="${escapeHtml(spot.id)}"
+              >
+                Potwierdź
+              </button>
+
+              <button
+                type="button"
+                class="gtk-popup-button gtk-popup-button-edit"
+                data-gtk-spot-action="edit"
+                data-gtk-spot-id="${escapeHtml(spot.id)}"
+              >
+                Edytuj położenie
+              </button>`
+            : ""
+        }
 
         <button
           type="button"
@@ -254,13 +316,16 @@ function buildUserSpotPopupHtml(spot: UserAddedSpot) {
           data-gtk-spot-action="delete"
           data-gtk-spot-id="${escapeHtml(spot.id)}"
         >
-          Usuń
+          Usuń lokalnie
         </button>
       </div>
 
       <span>
-        Ten punkt jest zapisany tylko lokalnie w tej przeglądarce.
-        Następny etap: wysłanie do OSM z konta użytkownika.
+        ${
+          isSubmitted
+            ? "Koperta jest już w OSM. W GTK pojawi się jako dane OSM po następnym syncu snapshotu."
+            : "Ten punkt jest zapisany tylko lokalnie w tej przeglądarce. Wyślij go do OSM, żeby inni mogli go zobaczyć po następnym syncu."
+        }
       </span>
     </div>
   `;
@@ -291,6 +356,7 @@ export function KopertyMap({
   const [loadingOsm, setLoadingOsm] = useState(false);
   const [addingMode, setAddingMode] = useState(false);
   const [editingSpotId, setEditingSpotId] = useState<string | null>(null);
+  const [sendingSpotId, setSendingSpotId] = useState<string | null>(null);
   const [radiusMeters, setRadiusMeters] = useState(DEFAULT_SEARCH_RADIUS_METERS);
   const [userAddedSpots, setUserAddedSpots] = useState<UserAddedSpot[]>([]);
   const [showRemoveChooser, setShowRemoveChooser] = useState(false);
@@ -467,6 +533,14 @@ export function KopertyMap({
       if (action === "delete") {
         removeUserSpotById(spotId);
       }
+
+      if (action === "login-osm") {
+        window.location.href = "/api/osm/auth/login";
+      }
+
+      if (action === "send-osm") {
+        void sendUserSpotToOsm(spotId);
+      }
     };
 
     document.addEventListener("click", handlePopupAction);
@@ -485,6 +559,14 @@ export function KopertyMap({
     drawUserAddedSpots(userAddedSpots);
     onUserSpotsChange?.(userAddedSpots);
   }, [userAddedSpots, onUserSpotsChange]);
+
+  useEffect(() => {
+    if (!userSpotsHydrated.current) {
+      return;
+    }
+
+    drawUserAddedSpots(userAddedSpots);
+  }, [osmUser, sendingSpotId]);
 
   useEffect(() => {
     if (userAddedSpots.length === 0 && showRemoveChooser) {
@@ -541,7 +623,9 @@ export function KopertyMap({
 
   function makeUserAddedMarker(L: LeafletWithCluster, spot: UserAddedSpot) {
     const icon = L.divIcon({
-      className: "user-added-marker gtk-local-marker",
+      className: `user-added-marker gtk-local-marker ${
+        spot.status === "osm_submitted" ? "gtk-local-marker-submitted" : ""
+      }`,
       html: `
         <span class="gtk-marker-icon">♿</span>
         <small class="gtk-marker-label">GTK</small>
@@ -552,7 +636,7 @@ export function KopertyMap({
     });
 
     return L.marker([spot.lat, spot.lng], { icon }).bindPopup(
-      buildUserSpotPopupHtml(spot)
+      buildUserSpotPopupHtml(spot, Boolean(osmUser), sendingSpotId === spot.id)
     );
   }
 
@@ -833,6 +917,73 @@ export function KopertyMap({
     );
   }
 
+  async function sendUserSpotToOsm(spotId: string) {
+    const spot = userAddedSpots.find((item) => item.id === spotId);
+
+    if (!spot) {
+      setLocationMessage("Nie znaleziono lokalnego szkicu koperty.");
+      return;
+    }
+
+    if (!osmUser) {
+      window.location.href = "/api/osm/auth/login";
+      return;
+    }
+
+    setSendingSpotId(spotId);
+    pendingUserSpotPopupId.current = spotId;
+    setLocationMessage("Wysyłam kopertę do OpenStreetMap…");
+
+    try {
+      const response = await fetch("/api/osm/edit/disabled-parking-space", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          lat: spot.lat,
+          lng: spot.lng,
+          localSpotId: spot.id
+        })
+      });
+
+      const data = (await response.json()) as SendToOsmResponse;
+
+      if (!response.ok || !data.ok || !data.nodeId || !data.osmUrl) {
+        throw new Error(data.error || "Nie udało się wysłać koperty do OSM.");
+      }
+
+      setUserAddedSpots((current) =>
+        current.map((item) => {
+          if (item.id !== spotId) {
+            return item;
+          }
+
+          return {
+            ...item,
+            status: "osm_submitted",
+            submittedAt: new Date().toISOString(),
+            submittedByName: osmUser.displayName || "użytkownik OSM",
+            osmNodeId: data.nodeId,
+            osmChangesetId: data.changesetId,
+            osmUrl: data.osmUrl
+          };
+        })
+      );
+
+      setLocationMessage(
+        "Koperta została wysłana do OSM. Po kolejnym syncu snapshotu będzie widoczna dla wszystkich użytkowników GTK."
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Nieznany błąd wysyłki do OSM.";
+
+      setLocationMessage(`Błąd wysyłki do OSM: ${message}`);
+    } finally {
+      setSendingSpotId(null);
+    }
+  }
+
   function removeUserSpotById(spotId: string) {
     const removedSpot = userAddedSpots.find((spot) => spot.id === spotId);
     const next = userAddedSpots.filter((spot) => spot.id !== spotId);
@@ -843,12 +994,12 @@ export function KopertyMap({
 
     if (removedSpot) {
       setLocationMessage(
-        `Usunięto szkic koperty ${removedSpot.lat.toFixed(
+        `Usunięto lokalny marker ${removedSpot.lat.toFixed(
           5
         )}, ${removedSpot.lng.toFixed(5)}.`
       );
     } else {
-      setLocationMessage("Usunięto szkic koperty.");
+      setLocationMessage("Usunięto lokalny marker.");
     }
   }
 
@@ -1071,41 +1222,69 @@ export function KopertyMap({
                     </span>
 
                     <div>
-                      <h3>Szkic koperty {index + 1}</h3>
+                      <h3>
+                        {spot.status === "osm_submitted"
+                          ? `Wysłana koperta ${index + 1}`
+                          : `Szkic koperty ${index + 1}`}
+                      </h3>
                       <p>{formatUserSpotGps(spot)}</p>
                       <small>Dodano: {formatUserSpotDate(spot)}</small>
                       <small>Autor: {spot.addedByName || "użytkownik lokalny"}</small>
+                      {spot.osmUrl ? (
+                        <small>
+                          <a href={spot.osmUrl} target="_blank" rel="noreferrer">
+                            Zobacz w OSM
+                          </a>
+                        </small>
+                      ) : null}
                     </div>
                   </div>
 
                   <div className="remove-chooser-status">
-                    <span>lokalny szkic</span>
+                    <span>
+                      {spot.status === "osm_submitted"
+                        ? "wysłano do OSM"
+                        : "lokalny szkic"}
+                    </span>
                     <span>{spot.confirmations || 0} / 5 potwierdzeń</span>
                   </div>
 
                   <div className="remove-chooser-actions">
-                    <button
-                      type="button"
-                      className="confirm-single-button"
-                      onClick={() => confirmUserSpotById(spot.id)}
-                    >
-                      Potwierdź
-                    </button>
+                    {spot.status !== "osm_submitted" ? (
+                      <>
+                        <button
+                          type="button"
+                          className="send-osm-single-button"
+                          onClick={() => sendUserSpotToOsm(spot.id)}
+                          disabled={sendingSpotId === spot.id}
+                        >
+                          {sendingSpotId === spot.id ? "Wysyłam…" : "Wyślij do OSM"}
+                        </button>
 
-                    <button
-                      type="button"
-                      className="edit-single-button"
-                      onClick={() => startEditingUserSpot(spot.id)}
-                    >
-                      Edytuj
-                    </button>
+                        <button
+                          type="button"
+                          className="confirm-single-button"
+                          onClick={() => confirmUserSpotById(spot.id)}
+                        >
+                          Potwierdź
+                        </button>
+
+                        <button
+                          type="button"
+                          className="edit-single-button"
+                          onClick={() => startEditingUserSpot(spot.id)}
+                        >
+                          Edytuj
+                        </button>
+                      </>
+                    ) : null}
 
                     <button
                       type="button"
                       className="remove-single-button"
                       onClick={() => removeUserSpotById(spot.id)}
                     >
-                      Usuń
+                      Usuń lokalnie
                     </button>
                   </div>
                 </article>

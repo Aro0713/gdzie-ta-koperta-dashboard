@@ -1433,3 +1433,44 @@ textarea {
     width: 100%;
   }
 }
+
+.gtk-popup-button-osm,
+.send-osm-single-button {
+  background: #0f766e;
+}
+
+.gtk-popup-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 0 10px;
+  color: white;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.gtk-popup-link-osm {
+  background: #0f766e;
+}
+
+.gtk-local-marker-submitted {
+  background: linear-gradient(135deg, #0f766e, #22c55e) !important;
+}
+
+.send-osm-single-button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  color: white;
+  cursor: pointer;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.send-osm-single-button:disabled,
+.gtk-popup-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
