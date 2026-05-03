@@ -1145,3 +1145,45 @@ textarea {
     width: 100%;
   }
 }
+
+.osm-login-button,
+.osm-login-loading,
+.osm-user-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  border-radius: 999px;
+  font-size: 0.86rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.osm-login-button {
+  padding: 0 13px;
+  color: white;
+  background: linear-gradient(135deg, #15803d, #22c55e);
+  box-shadow: 0 12px 28px rgba(21, 128, 61, 0.22);
+}
+
+.osm-login-loading {
+  padding: 0 12px;
+  color: var(--muted);
+  background: rgba(20, 32, 51, 0.06);
+}
+
+.osm-user-pill {
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  color: #14532d;
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.osm-user-pill a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: white;
+  background: #15803d;
+}

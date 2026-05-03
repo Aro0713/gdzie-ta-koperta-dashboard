@@ -1,5 +1,6 @@
 ﻿import Link from "next/link";
 import { appConfig } from "@/lib/appConfig";
+import { OsmLoginStatus } from "@/components/OsmLoginStatus";
 
 export function Header() {
   return (
@@ -16,6 +17,7 @@ export function Header() {
         <Link href="/mapa">Mapa</Link>
         <Link href="/zglos">Zgłoś kopertę</Link>
         <Link href="/wniosek">Wniosek do urzędu</Link>
+        <OsmLoginStatus />
       </nav>
     </header>
   );
