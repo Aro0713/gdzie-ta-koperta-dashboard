@@ -1,21 +1,15 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { DashboardSpotList } from "@/components/DashboardSpotList";
 import { KopertyMap, type UserAddedSpot } from "@/components/KopertyMap";
 import { StatsCards, type StatsCardItem } from "@/components/StatsCards";
-import { readLocalOfficialRequests } from "@/lib/localOfficialRequests";
 import type { OsmParkingResponse } from "@/lib/osmParking";
 
 export function DashboardHome() {
   const [osmData, setOsmData] = useState<OsmParkingResponse | null>(null);
   const [userSpots, setUserSpots] = useState<UserAddedSpot[]>([]);
-  const [requestCount, setRequestCount] = useState(0);
-
-  useEffect(() => {
-    setRequestCount(readLocalOfficialRequests().length);
-  }, []);
 
   const osmExactKoperty = useMemo(() => {
     return (osmData?.features || []).filter(
@@ -80,11 +74,6 @@ export function DashboardHome() {
       label: "do sprawdzenia",
       value: userSpotsToVerify,
       detail: "dodane, ale jeszcze niepotwierdzone"
-    },
-    {
-      label: "wnioski",
-      value: requestCount,
-      detail: "z modułu wniosków do urzędu/właściciela"
     }
   ];
 
@@ -101,7 +90,7 @@ export function DashboardHome() {
               <p className="dashboard-map-note">
                 ♿ oznacza dokładną kopertę z OSM. P oznacza parking z informacją
                 o miejscach dla osób z niepełnosprawnościami, ale bez dokładnej
-                lokalizacji koperty.
+                lokalizacji koperty. Punkty GTK są szkicami dodanymi z mapy.
               </p>
             </div>
 
@@ -125,8 +114,8 @@ export function DashboardHome() {
             <h2>Ostatnio pobrane punkty</h2>
             <p className="dashboard-map-note">
               Lista jest budowana z danych OSM pobranych dla aktualnej
-              lokalizacji urządzenia. Pokazujemy najpierw dokładne koperty, potem
-              parkingi z informacją o miejscach dla OzN.
+              lokalizacji urządzenia. Pokazujemy najpierw dokładne koperty,
+              potem parkingi z informacją o miejscach dla OzN.
             </p>
           </div>
 

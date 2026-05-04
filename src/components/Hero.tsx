@@ -8,17 +8,15 @@ export function Hero() {
         <p className="eyebrow">projekt społeczny · open maps · dostępność</p>
         <h1>Gdzie ta koperta?</h1>
         <p className="hero-lead">
-          Dashboard pod aplikację, która ma pomagać osobom z niepełnosprawnościami
-          znaleźć realnie dostępne miejsca parkingowe.
+          Aplikacja mapowa, która pomaga osobom z niepełnosprawnościami
+          znaleźć realnie dostępne miejsca parkingowe i uzupełniać dane
+          bezpośrednio przez OpenStreetMap.
         </p>
         <p className="mission-line">{appConfig.mission}</p>
 
         <div className="hero-actions">
           <Link className="primary-button" href="/mapa">
             Otwórz mapę
-          </Link>
-          <Link className="ghost-button" href="/zglos">
-            Zgłoś kopertę
           </Link>
         </div>
       </div>

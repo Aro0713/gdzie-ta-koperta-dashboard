@@ -15,8 +15,6 @@ export function Header() {
 
       <nav className="top-nav" aria-label="Główna nawigacja">
         <Link href="/mapa">Mapa</Link>
-        <Link href="/zglos">Zgłoś kopertę</Link>
-        <Link href="/wniosek">Wniosek do urzędu</Link>
         <OsmLoginStatus />
       </nav>
     </header>

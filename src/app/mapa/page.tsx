@@ -1,6 +1,5 @@
 ﻿"use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Header } from "@/components/Header";
 import { KopertyMap } from "@/components/KopertyMap";
@@ -35,13 +34,10 @@ export default function MapaPage() {
         <p className="eyebrow">pełny widok</p>
         <h1>Mapa kopert</h1>
         <p>
-          Mapa pokazuje istniejące dane z OpenStreetMap w promieniu 5 km od
-          lokalizacji urządzenia. Te punkty wymagają społecznego potwierdzania,
-          bo OSM pokazuje dane mapowe, a nie gwarancję aktualnej dostępności.
+          Mapa pokazuje istniejące dane z OpenStreetMap w promieniu wybranym
+          przez użytkownika. Dodawanie nowych kopert odbywa się bezpośrednio
+          na mapie, z konta OpenStreetMap.
         </p>
-        <Link className="primary-button" href="/zglos">
-          Zgłoś nową kopertę
-        </Link>
       </section>
 
       <section className="dashboard-grid dashboard-grid-map">
