@@ -1962,3 +1962,73 @@ textarea {
   line-height: 1.6;
   text-shadow: 0 2px 18px rgba(0, 0, 0, 0.28);
 }
+
+/* --- GTK: fixed team mission image panel using existing public/koperta-profile.jpg --- */
+.team-hero-panel.team-hero-panel-photo {
+  position: relative !important;
+  overflow: hidden !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 280px !important;
+  padding: 28px !important;
+  border-radius: var(--radius-xl) !important;
+  color: white !important;
+  isolation: isolate !important;
+  background:
+    linear-gradient(180deg, rgba(10, 34, 68, 0.18) 0%, rgba(9, 43, 92, 0.84) 100%),
+    linear-gradient(135deg, rgba(20, 119, 212, 0.50), rgba(7, 56, 122, 0.74)),
+    url("/koperta-profile.jpg") center / cover no-repeat !important;
+}
+
+.team-hero-panel.team-hero-panel-photo .team-hero-panel-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    radial-gradient(circle at top right, rgba(38, 183, 255, 0.22), transparent 18rem),
+    linear-gradient(135deg, rgba(0, 37, 80, 0.16), rgba(0, 25, 55, 0.68));
+  pointer-events: none;
+}
+
+.team-hero-panel.team-hero-panel-photo .team-hero-panel-bg-text {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  width: 100%;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.14);
+  font-size: clamp(3.2rem, 8vw, 6.8rem);
+  font-weight: 1000;
+  line-height: 0.9;
+  letter-spacing: -0.08em;
+  pointer-events: none;
+  user-select: none;
+}
+
+.team-hero-panel.team-hero-panel-photo .team-hero-panel-content {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  max-width: 560px;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.team-hero-panel-content-centered {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  margin: 0 auto;
+  padding-top: 30px;
+}
+
+.team-hero-panel.team-hero-panel-photo .team-hero-panel-content span {
+  color: rgba(255, 255, 255, 0.98);
+  font-size: 1.14rem;
+  font-weight: 800;
+  line-height: 1.75;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.38);
+}

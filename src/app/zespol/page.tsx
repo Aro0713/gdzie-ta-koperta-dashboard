@@ -1,6 +1,5 @@
 ﻿import Link from "next/link";
 import { Header } from "@/components/Header";
-import Image from "next/image";
 
 const team = [
   {
@@ -44,30 +43,24 @@ export default function ZespolPage() {
             kolejna mapa dla samej mapy — celem jest praktyczna dostępność.
           </p>
         </div>
+          <div
+            className="team-hero-panel team-hero-panel-photo"
+            role="img"
+            aria-label="Miejsce parkingowe dla osób z niepełnosprawnościami"
+          >
+            <div className="team-hero-panel-overlay" />
 
-      <div className="team-hero-panel team-hero-panel-photo">
-        <Image
-          src="/hero-koperta.jpg"
-          alt="Miejsce parkingowe dla osób z niepełnosprawnościami"
-          fill
-          className="team-hero-panel-image"
-          priority
-        />
+            <div className="team-hero-panel-bg-text" aria-hidden="true">
+              MISJA
+            </div>
 
-        <div className="team-hero-panel-overlay" />
-
-        <div className="team-hero-panel-bg-text" aria-hidden="true">
-          MISJA
-        </div>
-
-        <div className="team-hero-panel-content">
-          <strong>Misja</strong>
-          <span>
-            Dostępność nie może być teorią. Musi być dla ludzi, musi być realna i
-            musi działać wtedy, kiedy ktoś naprawdę jej potrzebuje.
-          </span>
-        </div>
-      </div>
+            <div className="team-hero-panel-content team-hero-panel-content-centered">
+              <span>
+                Dostępność nie może być teorią. Musi być dla ludzi, musi być realna
+                i musi działać wtedy, kiedy ktoś naprawdę jej potrzebuje.
+              </span>
+            </div>
+          </div>
       </section>
 
       <section className="team-grid" aria-label="Zespół projektu">
