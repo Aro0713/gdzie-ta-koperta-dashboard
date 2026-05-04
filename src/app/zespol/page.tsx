@@ -1,5 +1,6 @@
 ﻿import Link from "next/link";
 import { Header } from "@/components/Header";
+import Image from "next/image";
 
 const team = [
   {
@@ -44,14 +45,29 @@ export default function ZespolPage() {
           </p>
         </div>
 
-        <div className="team-hero-panel">
+      <div className="team-hero-panel team-hero-panel-photo">
+        <Image
+          src="/hero-koperta.jpg"
+          alt="Miejsce parkingowe dla osób z niepełnosprawnościami"
+          fill
+          className="team-hero-panel-image"
+          priority
+        />
+
+        <div className="team-hero-panel-overlay" />
+
+        <div className="team-hero-panel-bg-text" aria-hidden="true">
+          MISJA
+        </div>
+
+        <div className="team-hero-panel-content">
           <strong>Misja</strong>
           <span>
-            Dostępność ma działać w codziennym życiu: na parkingu, przy urzędzie,
-            przy przychodni, pod domem i wszędzie tam, gdzie brak jednej
-            „koperty” potrafi zablokować komuś normalne funkcjonowanie.
+            Dostępność nie może być teorią. Musi być dla ludzi, musi być realna i
+            musi działać wtedy, kiedy ktoś naprawdę jej potrzebuje.
           </span>
         </div>
+      </div>
       </section>
 
       <section className="team-grid" aria-label="Zespół projektu">
