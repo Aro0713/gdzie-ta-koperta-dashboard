@@ -7,7 +7,15 @@ const team = [
     name: "Łukasz Kwaśny",
     role: "Autor pomysłu projektu społecznego",
     description:
-      "Pomysłodawca projektu „Gdzie ta Koperta?” — inicjatywy, która ma realnie ułatwić osobom z niepełnosprawnościami odnajdywanie miejsc parkingowych i uzupełnianie brakujących danych w przestrzeni miejskiej.",
+      "Pomysłodawca projektu „Gdzie ta Koperta?”. Na co dzień dziennikarz Radia 357. Inicjuje społeczne działania, które mają realnie ułatwić osobom z niepełnosprawnościami odnajdywanie miejsc parkingowych i uzupełnianie brakujących danych w przestrzeni miejskiej.",
+    hashtags: [
+      "#GdzieTaKoperta",
+      "#Radio357",
+      "#Dostępność",
+      "#Niepełnosprawność",
+      "#OpenStreetMap",
+      "#LukaszKwasny"
+    ],
     accent: "idea"
   },
   {
@@ -74,6 +82,13 @@ export default function ZespolPage() {
               <p className="eyebrow">{person.role}</p>
               <h2>{person.name}</h2>
               <p>{person.description}</p>
+              {"hashtags" in person && person.hashtags ? (
+              <div className="team-hashtags">
+                {person.hashtags.map((tag) => (
+                  <span key={tag}>{tag}</span>
+                ))}
+              </div>
+            ) : null}
             </div>
           </article>
         ))}

@@ -2032,3 +2032,21 @@ textarea {
   line-height: 1.75;
   text-shadow: 0 2px 18px rgba(0, 0, 0, 0.38);
 }
+.team-hashtags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.team-hashtags span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #0c4a8a;
+  background: rgba(20, 119, 212, 0.09);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
