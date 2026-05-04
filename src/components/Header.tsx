@@ -15,6 +15,7 @@ export function Header() {
 
       <nav className="top-nav" aria-label="Główna nawigacja">
         <Link href="/mapa">Mapa</Link>
+        <Link href="/zespol">Zespół</Link>
         <OsmLoginStatus />
       </nav>
     </header>
