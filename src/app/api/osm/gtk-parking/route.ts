@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import type { Feature, FeatureCollection, Point } from "geojson";
 import type { OsmParkingProperties } from "@/lib/osmParking";
 
@@ -21,10 +21,12 @@ type OverpassResponse = {
   };
 };
 
+type QueryMode = "features" | "ids";
+
 const OVERPASS_ENDPOINTS = [
   process.env.OVERPASS_API_URL,
-  "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass-api.de/api/interpreter"
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter"
 ].filter(Boolean) as string[];
 
 /**
@@ -33,17 +35,32 @@ const OVERPASS_ENDPOINTS = [
  */
 const POLAND_BBOX = "49.0,14.0,55.2,24.5";
 
-function buildGtkOverpassQuery() {
+function getQueryMode(request: NextRequest): QueryMode {
+  const { searchParams } = new URL(request.url);
+  return searchParams.get("mode") === "ids" ? "ids" : "features";
+}
+
+function buildGtkOverpassQuery(mode: QueryMode) {
+  const timeout = mode === "ids" ? 10 : 20;
+  const output = mode === "ids" ? "ids" : "body";
+
   return `
-[out:json][timeout:25];
-(
-  node["amenity"="parking_space"]["parking_space"="disabled"]["survey:tool"="GdzieTaKoperta"](${POLAND_BBOX});
-  node["amenity"="parking_space"]["parking_space"="disabled"]["source:app"="GdzieTaKoperta"](${POLAND_BBOX});
-  node["amenity"="parking_space"]["parking_space"="disabled"]["source:application"="GdzieTaKoperta"](${POLAND_BBOX});
-  node["amenity"="parking_space"]["parking_space"="disabled"]["created_by"="GdzieTaKoperta"](${POLAND_BBOX});
-);
-out body;
+[out:json][timeout:${timeout}];
+node["survey:tool"="GdzieTaKoperta"]["amenity"="parking_space"]["parking_space"="disabled"](${POLAND_BBOX});
+out ${output};
 `;
+}
+
+function getUniqueNodeIds(data: OverpassResponse) {
+  const ids = new Set<number>();
+
+  for (const element of data.elements || []) {
+    if (element.type === "node" && typeof element.id === "number") {
+      ids.add(element.id);
+    }
+  }
+
+  return Array.from(ids).sort((a, b) => a - b);
 }
 
 function isValidOverpassNode(element: OverpassElement) {
@@ -86,7 +103,7 @@ function toFeature(element: OverpassElement): Feature<Point, OsmParkingPropertie
   };
 }
 
-async function fetchOverpass(endpoint: string) {
+async function fetchOverpass(endpoint: string, mode: QueryMode) {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -95,7 +112,7 @@ async function fetchOverpass(endpoint: string) {
       "User-Agent": "GdzieTaKoperta/1.0 contact:www.gdzietakoperta.pl"
     },
     body: new URLSearchParams({
-      data: buildGtkOverpassQuery()
+      data: buildGtkOverpassQuery(mode)
     }),
     cache: "no-store"
   });
@@ -117,12 +134,38 @@ async function fetchOverpass(endpoint: string) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const mode = getQueryMode(request);
   const errors: string[] = [];
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
-      const data = await fetchOverpass(endpoint);
+      const data = await fetchOverpass(endpoint, mode);
+      const osmNodeIds = getUniqueNodeIds(data);
+
+      if (mode === "ids") {
+        return NextResponse.json(
+          {
+            type: "FeatureCollection",
+            metadata: {
+              source: "OpenStreetMap live data via Overpass API",
+              sourceStatus: "osm_live_overpass",
+              mode: "country_gtk_live_ids",
+              country: "Poland",
+              count: osmNodeIds.length,
+              osmBaseTimestamp: data.osm3s?.timestamp_osm_base || null,
+              overpassEndpoint: endpoint
+            },
+            osmNodeIds,
+            features: []
+          },
+          {
+            headers: {
+              "Cache-Control": "s-maxage=20, stale-while-revalidate=60"
+            }
+          }
+        );
+      }
 
       const uniqueNodes = new Map<number, OverpassElement>();
 
@@ -144,17 +187,19 @@ export async function GET() {
           osmBaseTimestamp: string | null;
           overpassEndpoint: string;
         };
+        osmNodeIds: number[];
       } = {
         type: "FeatureCollection",
         metadata: {
           source: "OpenStreetMap live data via Overpass API",
           sourceStatus: "osm_live_overpass",
-          mode: "country_gtk_live",
+          mode: "country_gtk_live_features",
           country: "Poland",
           count: features.length,
           osmBaseTimestamp: data.osm3s?.timestamp_osm_base || null,
           overpassEndpoint: endpoint
         },
+        osmNodeIds,
         features
       };
 
@@ -171,6 +216,7 @@ export async function GET() {
 
       console.error("[api/osm/gtk-parking] Overpass endpoint failed", {
         endpoint,
+        mode,
         message
       });
     }

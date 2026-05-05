@@ -7,6 +7,10 @@ import { KopertyMap, type UserAddedSpot } from "@/components/KopertyMap";
 import { StatsCards, type StatsCardItem } from "@/components/StatsCards";
 import type { OsmParkingResponse } from "@/lib/osmParking";
 
+type GtkLiveIndexResponse = OsmParkingResponse & {
+  osmNodeIds?: Array<string | number>;
+};
+
 export function DashboardHome() {
   const [osmData, setOsmData] = useState<OsmParkingResponse | null>(null);
   const [userSpots, setUserSpots] = useState<UserAddedSpot[]>([]);
@@ -25,11 +29,11 @@ export function DashboardHome() {
       setGtkLiveDataError(false);
 
       try {
-        const response = await fetch("/api/osm/gtk-parking", {
+        const response = await fetch("/api/osm/gtk-parking?mode=ids", {
           cache: "no-store"
         });
 
-        const data = (await response.json()) as OsmParkingResponse;
+        const data = (await response.json()) as GtkLiveIndexResponse;
 
         if (!response.ok || data.error) {
           throw new Error(data.error || "Nie udało się pobrać GTK z OSM.");
@@ -112,6 +116,12 @@ export function DashboardHome() {
   const gtkLiveOsmIds = useMemo(() => {
     const ids = new Set<string>();
 
+    const liveData = gtkLiveData as GtkLiveIndexResponse | null;
+
+    for (const osmNodeId of liveData?.osmNodeIds || []) {
+      ids.add(String(osmNodeId));
+    }
+
     for (const feature of gtkLiveData?.features || []) {
       const osmId = feature.properties?.osmId;
 
@@ -134,7 +144,10 @@ export function DashboardHome() {
   }, [gtkLiveOsmIds, userSpots]);
 
   const gtkLiveCount =
-    gtkLiveData?.metadata?.count ?? gtkLiveData?.features?.length ?? 0;
+    gtkLiveData?.metadata?.count ??
+    (gtkLiveData as GtkLiveIndexResponse | null)?.osmNodeIds?.length ??
+    gtkLiveData?.features?.length ??
+    0;
 
   const gtkCountryCount = gtkLiveCount + localSubmittedGtkNotYetInLiveOsm;
 
