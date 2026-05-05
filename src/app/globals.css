@@ -2050,3 +2050,84 @@ textarea {
   font-size: 0.78rem;
   font-weight: 900;
 }
+.stat-card-link {
+  position: relative;
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  border-color: rgba(20, 119, 212, 0.28);
+  background:
+    linear-gradient(
+      135deg,
+      rgba(20, 119, 212, 0.1),
+      rgba(42, 169, 240, 0.2),
+      rgba(232, 246, 255, 0.82),
+      rgba(20, 119, 212, 0.12)
+    );
+  background-size: 260% 260%;
+  box-shadow: 0 18px 45px rgba(20, 119, 212, 0.16);
+  animation: gtkBluePanelShimmer 4.8s ease-in-out infinite;
+}
+
+.stat-card-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      110deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0) 34%,
+      rgba(255, 255, 255, 0.55) 50%,
+      rgba(255, 255, 255, 0) 66%,
+      transparent 100%
+    );
+  transform: translateX(-130%);
+  animation: gtkBluePanelSheen 3.4s ease-in-out infinite;
+}
+
+.stat-card-link > * {
+  position: relative;
+  z-index: 1;
+}
+
+.stat-card-link:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 22px 55px rgba(20, 119, 212, 0.24);
+}
+
+.stat-card-link:focus-visible {
+  outline: 3px solid rgba(20, 119, 212, 0.35);
+  outline-offset: 4px;
+}
+
+@keyframes gtkBluePanelShimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes gtkBluePanelSheen {
+  0%,
+  22% {
+    transform: translateX(-130%);
+  }
+
+  58% {
+    transform: translateX(130%);
+  }
+
+  100% {
+    transform: translateX(130%);
+  }
+}

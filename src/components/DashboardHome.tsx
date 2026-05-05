@@ -1,15 +1,85 @@
 ﻿"use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { DashboardSpotList } from "@/components/DashboardSpotList";
 import { KopertyMap, type UserAddedSpot } from "@/components/KopertyMap";
 import { StatsCards, type StatsCardItem } from "@/components/StatsCards";
 import type { OsmParkingResponse } from "@/lib/osmParking";
 
+type GtkCountryStats = {
+  total: number;
+  confirmed: number;
+  toVerify: number;
+};
+
+type GtkCountryStatsResponse = Partial<GtkCountryStats> & {
+  error?: string;
+};
+
+function toSafeNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
 export function DashboardHome() {
   const [osmData, setOsmData] = useState<OsmParkingResponse | null>(null);
   const [userSpots, setUserSpots] = useState<UserAddedSpot[]>([]);
+
+  const [gtkCountryStats, setGtkCountryStats] =
+    useState<GtkCountryStats | null>(null);
+  const [loadingGtkCountryStats, setLoadingGtkCountryStats] = useState(true);
+  const [gtkCountryStatsError, setGtkCountryStatsError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadGtkCountryStats() {
+      setLoadingGtkCountryStats(true);
+      setGtkCountryStatsError(false);
+
+      try {
+        const response = await fetch("/api/gtk-spots/stats", {
+          cache: "no-store"
+        });
+
+        const data = (await response.json()) as GtkCountryStatsResponse;
+
+        if (!response.ok || data.error) {
+          throw new Error(
+            data.error || "Nie udało się pobrać krajowych statystyk GTK."
+          );
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setGtkCountryStats({
+          total: toSafeNumber(data.total),
+          confirmed: toSafeNumber(data.confirmed),
+          toVerify: toSafeNumber(data.toVerify)
+        });
+      } catch {
+        if (!active) {
+          return;
+        }
+
+        setGtkCountryStats(null);
+        setGtkCountryStatsError(true);
+      } finally {
+        if (active) {
+          setLoadingGtkCountryStats(false);
+        }
+      }
+    }
+
+    void loadGtkCountryStats();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const osmExactKoperty = useMemo(() => {
     return (osmData?.features || []).filter(
@@ -23,12 +93,6 @@ export function DashboardHome() {
         feature.properties?.objectType === "parking_with_disabled_capacity"
     ).length;
   }, [osmData]);
-
-  const confirmedUserSpots = useMemo(() => {
-    return userSpots.filter((spot) => (spot.confirmations || 0) >= 5).length;
-  }, [userSpots]);
-
-  const userSpotsToVerify = Math.max(userSpots.length - confirmedUserSpots, 0);
 
   const visibleFeatures = useMemo(() => {
     return [...(osmData?.features || [])]
@@ -52,28 +116,53 @@ export function DashboardHome() {
       .slice(0, 18);
   }, [osmData]);
 
-  const totalKopertyInDatabase = osmExactKoperty + userSpots.length;
+  const gtkCountryTotalValue: string | number = loadingGtkCountryStats
+    ? "…"
+    : gtkCountryStatsError
+      ? "—"
+      : gtkCountryStats?.total ?? 0;
+
+  const gtkConfirmedValue: string | number = loadingGtkCountryStats
+    ? "…"
+    : gtkCountryStatsError
+      ? "—"
+      : gtkCountryStats?.confirmed ?? 0;
+
+  const gtkToVerifyValue: string | number = loadingGtkCountryStats
+    ? "…"
+    : gtkCountryStatsError
+      ? "—"
+      : gtkCountryStats?.toVerify ?? 0;
+
+  const gtkCountryDetail = loadingGtkCountryStats
+    ? "liczę koperty dodane w całej Polsce"
+    : gtkCountryStatsError
+      ? "brak krajowych statystyk GTK"
+      : "dodane przez użytkowników aplikacji w całej Polsce";
+
+  const totalKopertyInVisibleArea = osmExactKoperty + userSpots.length;
 
   const stats: StatsCardItem[] = [
     {
       label: "koperty w bazie",
-      value: totalKopertyInDatabase,
-      detail: `${osmExactKoperty} dokładnych z OSM + ${userSpots.length} GTK`
+      value: totalKopertyInVisibleArea,
+      detail: `${osmExactKoperty} dokładnych z OSM + ${userSpots.length} GTK w aktualnym widoku`
     },
     {
       label: "nowe koperty GTK",
-      value: userSpots.length,
-      detail: "dodane przez użytkowników aplikacji"
+      value: gtkCountryTotalValue,
+      detail: gtkCountryDetail,
+      href: "/mapa?widok=gtk-kraj"
     },
     {
       label: "potwierdzone",
-      value: confirmedUserSpots,
-      detail: "koperta wpada po 5 potwierdzeniach"
+      value: gtkConfirmedValue,
+      detail: "GTK w całej Polsce po 5 potwierdzeniach"
     },
     {
       label: "do sprawdzenia",
-      value: userSpotsToVerify,
-      detail: "dodane, ale jeszcze niepotwierdzone"
+      value: gtkToVerifyValue,
+      detail: "GTK w całej Polsce czekające na społeczność"
     }
   ];
 
@@ -124,7 +213,7 @@ export function DashboardHome() {
             <span className="map-status-pill">
               P: {osmParkingWithDisabledCapacity}
             </span>
-            <span className="map-status-pill">GTK: {userSpots.length}</span>
+            <span className="map-status-pill">GTK lokalnie: {userSpots.length}</span>
           </div>
         </div>
 
