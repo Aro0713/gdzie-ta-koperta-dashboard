@@ -1134,9 +1134,9 @@ export function KopertyMap({
         aria-label="Mapa kopert"
       />
 
-      <div className="map-toolbar map-toolbar-modern" aria-live="polite">
-        <div className="map-toolbar-top">
-          <div className="map-toolbar-actions">
+            <div className="map-toolbar map-toolbar-compact" aria-live="polite">
+        <div className="map-toolbar-compact-bar">
+          <div className="map-toolbar-compact-left">
             <button
               className="map-btn map-btn-neutral"
               onClick={() => locateUserAndLoadOsm(radiusMeters)}
@@ -1154,15 +1154,17 @@ export function KopertyMap({
               type="button"
             >
               {addingMode
-                ? "Kliknij miejsce na mapie"
+                ? "Kliknij na mapie"
                 : userAddedSpots.length > 0
-                  ? "Dodaj kolejną kopertę na mapie"
-                  : "Dodaj kopertę na mapie"}
+                  ? "Dodaj kolejną kopertę"
+                  : "Dodaj kopertę"}
             </button>
 
             {userAddedSpots.length > 0 ? (
               <button
-                className="map-btn map-btn-danger"
+                className={`map-btn map-btn-danger ${
+                  showRemoveChooser ? "map-btn-danger-active" : ""
+                }`}
                 onClick={toggleRemoveChooser}
                 type="button"
               >
@@ -1171,70 +1173,52 @@ export function KopertyMap({
             ) : null}
           </div>
 
-          <div className="map-toolbar-chips">
-            <span className="map-status-pill">♿ OSM: {exactOsmCount}</span>
-            <span className="map-status-pill">P: {parkingOsmCount}</span>
-            <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
-            <span className="map-status-pill">Razem OSM: {osmCount}</span>
-          </div>
-        </div>
+          <div className="map-toolbar-compact-right">
+            <div className="map-radius-inline">
+              <span className="map-radius-inline-min">100 m</span>
 
-        <div className="map-toolbar-bottom">
-          <div className="map-radius-card">
-            <div className="map-radius-header">
-              <span className="map-radius-title">Obszar wyszukiwania</span>
-              <strong className="map-radius-value">
+              <input
+                type="range"
+                min={MIN_SEARCH_RADIUS_METERS}
+                max={MAX_SEARCH_RADIUS_METERS}
+                step={100}
+                value={radiusMeters}
+                className="map-radius-slider map-radius-slider-inline"
+                onChange={(event) => {
+                  const next = clampRadius(Number(event.target.value));
+                  setRadiusMeters(next);
+                  updateVisibleRadius(next);
+                }}
+                onMouseUp={(event) => {
+                  const next = clampRadius(Number(event.currentTarget.value));
+                  refreshForRadius(next);
+                }}
+                onTouchEnd={(event) => {
+                  const next = clampRadius(Number(event.currentTarget.value));
+                  refreshForRadius(next);
+                }}
+              />
+
+              <strong className="map-radius-inline-value">
                 {formatRadiusLabel(radiusMeters)}
               </strong>
             </div>
 
-            <input
-              type="range"
-              min={MIN_SEARCH_RADIUS_METERS}
-              max={MAX_SEARCH_RADIUS_METERS}
-              step={100}
-              value={radiusMeters}
-              className="map-radius-slider"
-              onChange={(event) => {
-                const next = clampRadius(Number(event.target.value));
-                setRadiusMeters(next);
-                updateVisibleRadius(next);
-              }}
-              onMouseUp={(event) => {
-                const next = clampRadius(Number(event.currentTarget.value));
-                refreshForRadius(next);
-              }}
-              onTouchEnd={(event) => {
-                const next = clampRadius(Number(event.currentTarget.value));
-                refreshForRadius(next);
-              }}
-            />
-
-            <div className="map-radius-scale">
-              <span>100 m</span>
-              <span>1 km</span>
-              <span>2,5 km</span>
-              <span>5 km</span>
+            <div className="map-toolbar-chips map-toolbar-chips-compact">
+              <span className="map-status-pill">♿ OSM: {exactOsmCount}</span>
+              <span className="map-status-pill">P: {parkingOsmCount}</span>
+              <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
+              <span className="map-status-pill">Razem OSM: {osmCount}</span>
             </div>
-          </div>
-
-          <div className="map-toolbar-message">
-            {editingSpotId
-              ? "Tryb edycji aktywny. Kliknij nowe położenie koperty na mapie."
-              : addingMode
-                ? "Tryb dodawania aktywny. Kliknij dokładne miejsce koperty na mapie."
-                : locationMessage}
           </div>
         </div>
 
         {showRemoveChooser && userAddedSpots.length > 0 ? (
-          <div className="remove-chooser-card">
+          <div className="remove-chooser-popover">
             <div className="remove-chooser-header">
               <div>
-                <strong>Którą kopertę usunąć?</strong>
-                <span>
-                  Wybierz lokalny szkic zapisany w tej przeglądarce.
-                </span>
+                <strong>Wybierz kopertę do usunięcia</strong>
+                <span>Usuń tylko wybrany szkic zapisany w tej przeglądarce.</span>
               </div>
               <span className="remove-chooser-count">
                 {userAddedSpots.length}
@@ -1252,52 +1236,26 @@ export function KopertyMap({
                     <div>
                       <h3>
                         {spot.status === "osm_submitted"
-                          ? `Wysłana koperta ${index + 1}`
-                          : `Szkic koperty ${index + 1}`}
+                          ? `Koperta ${index + 1} (wysłana do OSM)`
+                          : `Koperta ${index + 1}`}
                       </h3>
                       <p>{formatUserSpotGps(spot)}</p>
                       <small>Dodano: {formatUserSpotDate(spot)}</small>
-                      <small>Autor: {spot.addedByName || "użytkownik lokalny"}</small>
-                      {spot.osmUrl ? (
-                        <small>
-                          <a href={spot.osmUrl} target="_blank" rel="noreferrer">
-                            Zobacz w OSM
-                          </a>
-                        </small>
-                      ) : null}
+                      <small>
+                        Autor: {spot.addedByName || "użytkownik lokalny"}
+                      </small>
                     </div>
-                  </div>
-
-                  <div className="remove-chooser-status">
-                    <span>
-                      {spot.status === "osm_submitted"
-                        ? "wysłano do OSM"
-                        : "lokalny szkic"}
-                    </span>
-                    <span>{spot.confirmations || 0} / 5 potwierdzeń</span>
                   </div>
 
                   <div className="remove-chooser-actions">
                     {spot.status !== "osm_submitted" ? (
-                      <>
-                        <button
-                          type="button"
-                          className="send-osm-single-button"
-                          onClick={() => sendUserSpotToOsm(spot.id)}
-                          disabled={sendingSpotId === spot.id}
-                        >
-                          {sendingSpotId === spot.id ? "Wysyłam…" : "Wyślij do OSM"}
-                        </button>
-
-
-                        <button
-                          type="button"
-                          className="edit-single-button"
-                          onClick={() => startEditingUserSpot(spot.id)}
-                        >
-                          Edytuj
-                        </button>
-                      </>
+                      <button
+                        type="button"
+                        className="edit-single-button"
+                        onClick={() => startEditingUserSpot(spot.id)}
+                      >
+                        Popraw położenie
+                      </button>
                     ) : null}
 
                     <button
@@ -1305,7 +1263,7 @@ export function KopertyMap({
                       className="remove-single-button"
                       onClick={() => removeUserSpotById(spot.id)}
                     >
-                      Usuń lokalnie
+                      Usuń tę kopertę
                     </button>
                   </div>
                 </article>

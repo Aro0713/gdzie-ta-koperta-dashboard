@@ -2260,3 +2260,250 @@ textarea {
     justify-content: flex-start;
   }
 }
+.map-shell {
+  position: relative;
+}
+
+.map-toolbar-compact {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 500;
+  display: grid;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.map-toolbar-compact-bar,
+.remove-chooser-popover {
+  pointer-events: auto;
+}
+
+.map-toolbar-compact-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(20, 119, 212, 0.14);
+  box-shadow: 0 14px 38px rgba(16, 24, 40, 0.14);
+  backdrop-filter: blur(14px);
+}
+
+.map-toolbar-compact-left,
+.map-toolbar-compact-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.map-toolbar-compact-right {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.map-radius-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 280px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(20, 119, 212, 0.06);
+}
+
+.map-radius-inline-min {
+  font-size: 0.8rem;
+  color: #667085;
+  white-space: nowrap;
+}
+
+.map-radius-inline-value {
+  min-width: 44px;
+  text-align: right;
+  font-size: 0.88rem;
+  color: var(--surface-dark);
+  white-space: nowrap;
+}
+
+.map-radius-slider-inline {
+  width: 180px;
+  margin: 0;
+}
+
+.map-toolbar-chips-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.map-toolbar-chips-compact .map-status-pill {
+  font-size: 0.8rem;
+  padding: 6px 10px;
+}
+
+.map-btn-danger-active {
+  background: #fee4e2;
+  color: #b42318;
+}
+
+.remove-chooser-popover {
+  max-width: 540px;
+  width: min(540px, 100%);
+  padding: 14px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(20, 119, 212, 0.14);
+  box-shadow: 0 18px 48px rgba(16, 24, 40, 0.18);
+  backdrop-filter: blur(14px);
+}
+
+.remove-chooser-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.remove-chooser-header strong {
+  display: block;
+  color: var(--surface-dark);
+  margin-bottom: 4px;
+}
+
+.remove-chooser-header span {
+  color: #667085;
+  font-size: 0.88rem;
+}
+
+.remove-chooser-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(20, 119, 212, 0.1);
+  color: var(--blue-dark);
+  font-weight: 700;
+}
+
+.remove-chooser-list {
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.remove-chooser-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(20, 119, 212, 0.12);
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.remove-chooser-main {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.remove-chooser-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(20, 119, 212, 0.1);
+  color: var(--blue-dark);
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.remove-chooser-main h3 {
+  margin: 0 0 4px;
+  font-size: 0.96rem;
+  color: var(--surface-dark);
+}
+
+.remove-chooser-main p {
+  margin: 0 0 4px;
+  color: #344054;
+  font-size: 0.9rem;
+}
+
+.remove-chooser-main small {
+  display: block;
+  color: #667085;
+  font-size: 0.8rem;
+}
+
+.remove-chooser-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+  min-width: 150px;
+}
+
+@media (max-width: 1100px) {
+  .map-toolbar-compact-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .map-toolbar-compact-right {
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .map-toolbar-compact {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+  }
+
+  .map-toolbar-compact-bar {
+    padding: 10px;
+    border-radius: 16px;
+  }
+
+  .map-toolbar-compact-left,
+  .map-toolbar-compact-right {
+    width: 100%;
+  }
+
+  .map-radius-inline {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .map-radius-slider-inline {
+    flex: 1 1 auto;
+    width: auto;
+  }
+
+  .remove-chooser-item {
+    flex-direction: column;
+  }
+
+  .remove-chooser-actions {
+    min-width: 0;
+    width: 100%;
+  }
+}
