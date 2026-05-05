@@ -70,8 +70,11 @@ export type UserAddedSpot = {
   lastConfirmedAt?: string;
 };
 
+type KopertyMapMode = "near-user" | "gtk-country";
+
 type KopertyMapProps = {
   full?: boolean;
+  mode?: KopertyMapMode;
   onOsmData?: (data: OsmParkingResponse) => void;
   onUserSpotsChange?: (spots: UserAddedSpot[]) => void;
 };
@@ -80,7 +83,10 @@ const MIN_SEARCH_RADIUS_METERS = 100;
 const MAX_SEARCH_RADIUS_METERS = 5000;
 const DEFAULT_SEARCH_RADIUS_METERS = 5000;
 const LOCAL_USER_SPOTS_KEY = "gdzietakoperta.localUserSpots.v1";
-
+const POLAND_BOUNDS: [[number, number], [number, number]] = [
+  [49.0, 14.0],
+  [55.2, 24.5]
+];
 function normalizeLeaflet(module: LeafletModuleWithMaybeDefault) {
   return (module.default || module) as LeafletWithCluster;
 }
@@ -324,9 +330,11 @@ function buildUserSpotPopupHtml(
 
 export function KopertyMap({
   full = false,
+  mode = "near-user",
   onOsmData,
   onUserSpotsChange
 }: KopertyMapProps) {
+  const isGtkCountryMode = mode === "gtk-country";
   const mapNode = useRef<HTMLDivElement | null>(null);
   const leafletMap = useRef<import("leaflet").Map | null>(null);
   const leafletApi = useRef<LeafletWithCluster | null>(null);
@@ -338,9 +346,11 @@ export function KopertyMap({
   const pendingUserSpotPopupId = useRef<string | null>(null);
   const userPosition = useRef<{ lat: number; lng: number } | null>(null);
 
-  const [locationMessage, setLocationMessage] = useState(
-    "Mapa gotowa. Pobierz lokalizację, aby zobaczyć koperty w wybranym promieniu."
-  );
+ const [locationMessage, setLocationMessage] = useState(
+  isGtkCountryMode
+    ? "Mapa kraju gotowa. Pobieram koperty GTK z OpenStreetMap."
+    : "Mapa gotowa. Pobierz lokalizację, aby zobaczyć koperty w wybranym promieniu."
+);
   const [osmCount, setOsmCount] = useState(0);
   const [exactOsmCount, setExactOsmCount] = useState(0);
   const [parkingOsmCount, setParkingOsmCount] = useState(0);
@@ -455,8 +465,13 @@ export function KopertyMap({
       drawUserAddedSpots(localSpots, L, map);
 
       window.setTimeout(() => {
-        locateUserAndLoadOsm();
-      }, 400);
+      if (mode === "gtk-country") {
+        void loadGtkCountryOsm();
+        return;
+      }
+
+      locateUserAndLoadOsm();
+    }, 400);
     }
 
     void loadMap();
@@ -469,7 +484,7 @@ export function KopertyMap({
         leafletMap.current = null;
       }
     };
-  }, [full]);
+  }, [full, mode]);
 
   useEffect(() => {
     if (!addingMode) {
@@ -576,12 +591,12 @@ export function KopertyMap({
   }, [userAddedSpots, onUserSpotsChange]);
 
   useEffect(() => {
-    if (!userSpotsHydrated.current) {
-      return;
-    }
+  if (!userSpotsHydrated.current) {
+    return;
+  }
 
-    drawUserAddedSpots(userAddedSpots);
-  }, [osmUser, sendingSpotId]);
+  drawUserAddedSpots(userAddedSpots);
+}, [osmUser, sendingSpotId, showRemoveChooser, userAddedSpots]);
 
   useEffect(() => {
     if (userAddedSpots.length === 0 && showRemoveChooser) {
@@ -786,6 +801,93 @@ function makeUserAddedMarker(L: LeafletWithCluster, spot: UserAddedSpot) {
       );
     }
   }
+  function drawGtkCountryFeatures(data: OsmParkingResponse) {
+  const L = leafletApi.current;
+  const map = leafletMap.current;
+
+  if (!L || !map) {
+    return;
+  }
+
+  clearOsmLayer();
+
+  const features = data.features || [];
+  const count = data.metadata?.count ?? features.length;
+
+  const exactCount = features.filter(
+    (feature) => feature.properties?.objectType === "disabled_parking_space"
+  ).length;
+
+  setOsmCount(count);
+  setExactOsmCount(exactCount || count);
+  setParkingOsmCount(0);
+
+  map.fitBounds(POLAND_BOUNDS, {
+    padding: [26, 26]
+  });
+
+  if (!features.length) {
+    setLocationMessage(
+      "Nie znaleziono kopert GTK w OpenStreetMap. Świeże edycje mogą pojawić się po krótkiej synchronizacji Overpass."
+    );
+    return;
+  }
+
+  const layerGroup = createOsmLayer(L);
+
+  features.forEach((feature) => {
+    layerGroup.addLayer(makeOsmMarker(L, feature));
+  });
+
+  layerGroup.addTo(map);
+  osmLayer.current = layerGroup;
+
+  setLocationMessage(
+    `Pokazuję ${count} kopert GTK dodanych przez użytkowników w OpenStreetMap w całej Polsce.`
+  );
+}
+
+async function loadGtkCountryOsm() {
+  setLoadingOsm(true);
+  setLocationMessage("Pobieram koperty GTK z OpenStreetMap dla całej Polski…");
+
+  try {
+    const response = await fetch("/api/osm/gtk-parking", {
+      cache: "no-store"
+    });
+
+    const data = (await response.json()) as Partial<OsmParkingResponse>;
+
+    if (!response.ok || data.error) {
+      throw new Error(data.error || "Nie udało się pobrać kopert GTK z OSM.");
+    }
+
+    const gtkData = data as OsmParkingResponse;
+
+    drawGtkCountryFeatures(gtkData);
+    onOsmData?.(gtkData);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Nieznany błąd pobierania GTK.";
+
+    setLocationMessage(`Błąd GTK/OSM: ${message}`);
+    setOsmCount(0);
+    setExactOsmCount(0);
+    setParkingOsmCount(0);
+
+    const emptyData: OsmParkingResponse = {
+      type: "FeatureCollection",
+      features: [],
+      metadata: {
+        count: 0
+      }
+    };
+
+    onOsmData?.(emptyData);
+  } finally {
+    setLoadingOsm(false);
+  }
+}
 
   async function fetchOsmParking(
     lat: number,
@@ -1156,8 +1258,7 @@ function removeUserSpotById(spotId: string) {
         }`}
         aria-label="Mapa kopert"
       />
-
-                 <div
+            <div
         className="map-toolbar map-toolbar-compact map-toolbar-topbar"
         aria-live="polite"
       >
@@ -1165,12 +1266,27 @@ function removeUserSpotById(spotId: string) {
           <div className="map-toolbar-compact-left">
             <button
               className="map-btn map-btn-neutral"
-              onClick={() => locateUserAndLoadOsm(radiusMeters)}
+              onClick={() => {
+                if (isGtkCountryMode) {
+                  void loadGtkCountryOsm();
+                  return;
+                }
+
+                locateUserAndLoadOsm(radiusMeters);
+              }}
               type="button"
               disabled={loadingOsm}
-              title="Pobierz lokalizację"
+              title={
+                isGtkCountryMode
+                  ? "Odśwież koperty GTK z OpenStreetMap"
+                  : "Pobierz lokalizację"
+              }
             >
-              {loadingOsm ? "Szukam…" : "Lokalizacja"}
+              {loadingOsm
+                ? "Pobieram…"
+                : isGtkCountryMode
+                  ? "Odśwież"
+                  : "Lokalizacja"}
             </button>
 
             <button
@@ -1203,41 +1319,57 @@ function removeUserSpotById(spotId: string) {
           </div>
 
           <div className="map-toolbar-compact-right">
-            <div className="map-radius-inline" aria-label="Obszar wyszukiwania">
-              <span className="map-radius-inline-min">100 m</span>
+            {isGtkCountryMode ? (
+              <div className="map-radius-inline map-country-inline">
+                <strong>Cała Polska</strong>
+              </div>
+            ) : (
+              <div className="map-radius-inline" aria-label="Obszar wyszukiwania">
+                <span className="map-radius-inline-min">100 m</span>
 
-              <input
-                type="range"
-                min={MIN_SEARCH_RADIUS_METERS}
-                max={MAX_SEARCH_RADIUS_METERS}
-                step={100}
-                value={radiusMeters}
-                className="map-radius-slider map-radius-slider-inline"
-                onChange={(event) => {
-                  const next = clampRadius(Number(event.target.value));
-                  setRadiusMeters(next);
-                  updateVisibleRadius(next);
-                }}
-                onMouseUp={(event) => {
-                  const next = clampRadius(Number(event.currentTarget.value));
-                  refreshForRadius(next);
-                }}
-                onTouchEnd={(event) => {
-                  const next = clampRadius(Number(event.currentTarget.value));
-                  refreshForRadius(next);
-                }}
-              />
+                <input
+                  type="range"
+                  min={MIN_SEARCH_RADIUS_METERS}
+                  max={MAX_SEARCH_RADIUS_METERS}
+                  step={100}
+                  value={radiusMeters}
+                  className="map-radius-slider map-radius-slider-inline"
+                  onChange={(event) => {
+                    const next = clampRadius(Number(event.target.value));
+                    setRadiusMeters(next);
+                    updateVisibleRadius(next);
+                  }}
+                  onMouseUp={(event) => {
+                    const next = clampRadius(Number(event.currentTarget.value));
+                    refreshForRadius(next);
+                  }}
+                  onTouchEnd={(event) => {
+                    const next = clampRadius(Number(event.currentTarget.value));
+                    refreshForRadius(next);
+                  }}
+                />
 
-              <strong className="map-radius-inline-value">
-                {formatRadiusLabel(radiusMeters)}
-              </strong>
-            </div>
+                <strong className="map-radius-inline-value">
+                  {formatRadiusLabel(radiusMeters)}
+                </strong>
+              </div>
+            )}
 
             <div className="map-toolbar-chips map-toolbar-chips-compact">
-              <span className="map-status-pill">♿ OSM: {exactOsmCount}</span>
-              <span className="map-status-pill">P: {parkingOsmCount}</span>
-              <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
-              <span className="map-status-pill">Razem: {osmCount}</span>
+              {isGtkCountryMode ? (
+                <>
+                  <span className="map-status-pill">♿ GTK: {exactOsmCount}</span>
+                  <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
+                  <span className="map-status-pill">Razem: {osmCount}</span>
+                </>
+              ) : (
+                <>
+                  <span className="map-status-pill">♿ OSM: {exactOsmCount}</span>
+                  <span className="map-status-pill">P: {parkingOsmCount}</span>
+                  <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
+                  <span className="map-status-pill">Razem: {osmCount}</span>
+                </>
+              )}
             </div>
           </div>
         </div>

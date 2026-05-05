@@ -2856,3 +2856,17 @@ textarea {
     font-size: 0.72rem;
   }
 }
+.map-toolbar-topbar .map-country-inline {
+  justify-content: center;
+  min-width: auto;
+  padding: 0 14px;
+  color: var(--blue-dark);
+  background: rgba(20, 119, 212, 0.09);
+}
+
+.map-toolbar-topbar .map-country-inline strong {
+  color: var(--blue-dark);
+  font-size: 0.84rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
