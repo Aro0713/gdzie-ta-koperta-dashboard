@@ -21,18 +21,26 @@ type OverpassResponse = {
   };
 };
 
-const OVERPASS_URL =
-  process.env.OVERPASS_API_URL || "https://overpass-api.de/api/interpreter";
+const OVERPASS_ENDPOINTS = [
+  process.env.OVERPASS_API_URL,
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass-api.de/api/interpreter"
+].filter(Boolean) as string[];
+
+/**
+ * BBox Polski z lekkim marginesem:
+ * south, west, north, east
+ */
+const POLAND_BBOX = "49.0,14.0,55.2,24.5";
 
 function buildGtkOverpassQuery() {
   return `
 [out:json][timeout:25];
-area["ISO3166-1"="PL"][admin_level="2"]->.searchArea;
 (
-  node["amenity"="parking_space"]["parking_space"="disabled"]["survey:tool"~"GdzieTaKoperta|GTK",i](area.searchArea);
-  node["amenity"="parking_space"]["parking_space"="disabled"]["source:app"~"GdzieTaKoperta|GTK",i](area.searchArea);
-  node["amenity"="parking_space"]["parking_space"="disabled"]["source:application"~"GdzieTaKoperta|GTK",i](area.searchArea);
-  node["amenity"="parking_space"]["parking_space"="disabled"]["created_by"~"GdzieTaKoperta|GTK",i](area.searchArea);
+  node["amenity"="parking_space"]["parking_space"="disabled"]["survey:tool"="GdzieTaKoperta"](${POLAND_BBOX});
+  node["amenity"="parking_space"]["parking_space"="disabled"]["source:app"="GdzieTaKoperta"](${POLAND_BBOX});
+  node["amenity"="parking_space"]["parking_space"="disabled"]["source:application"="GdzieTaKoperta"](${POLAND_BBOX});
+  node["amenity"="parking_space"]["parking_space"="disabled"]["created_by"="GdzieTaKoperta"](${POLAND_BBOX});
 );
 out body;
 `;
@@ -51,17 +59,14 @@ function isValidOverpassNode(element: OverpassElement) {
   );
 }
 
-function toFeature(
-  element: Required<Pick<OverpassElement, "id" | "lat" | "lon">> &
-    OverpassElement
-): Feature<Point, OsmParkingProperties> {
+function toFeature(element: OverpassElement): Feature<Point, OsmParkingProperties> {
   const tags = element.tags || {};
 
   return {
     type: "Feature",
     geometry: {
       type: "Point",
-      coordinates: [element.lon, element.lat]
+      coordinates: [element.lon as number, element.lat as number]
     },
     properties: {
       source: "openstreetmap",
@@ -81,89 +86,103 @@ function toFeature(
   };
 }
 
-export async function GET() {
-  try {
-    const response = await fetch(OVERPASS_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-      },
-      body: new URLSearchParams({
-        data: buildGtkOverpassQuery()
-      }),
-      cache: "no-store"
-    });
+async function fetchOverpass(endpoint: string) {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      Accept: "*/*",
+      "User-Agent": "GdzieTaKoperta/1.0 contact:www.gdzietakoperta.pl"
+    },
+    body: new URLSearchParams({
+      data: buildGtkOverpassQuery()
+    }),
+    cache: "no-store"
+  });
 
-    const text = await response.text();
+  const text = await response.text();
 
-    if (!response.ok) {
-      return NextResponse.json(
-        {
-          error: `Overpass API error ${response.status}`,
-          details: text.slice(0, 1200)
-        },
-        {
-          status: 502
-        }
-      );
-    }
-
-    const data = JSON.parse(text) as OverpassResponse;
-
-    const uniqueNodes = new Map<number, OverpassElement>();
-
-    for (const element of data.elements || []) {
-      if (isValidOverpassNode(element)) {
-        uniqueNodes.set(element.id!, element);
-      }
-    }
-
-    const features = Array.from(uniqueNodes.values()).map((element) =>
-      toFeature(
-        element as Required<Pick<OverpassElement, "id" | "lat" | "lon">> &
-          OverpassElement
-      )
-    );
-
-    const payload: FeatureCollection<Point, OsmParkingProperties> & {
-      metadata: {
-        source: string;
-        sourceStatus: string;
-        mode: string;
-        country: string;
-        count: number;
-        osmBaseTimestamp: string | null;
-      };
-    } = {
-      type: "FeatureCollection",
-      metadata: {
-        source: "OpenStreetMap live data via Overpass API",
-        sourceStatus: "osm_live_overpass",
-        mode: "country_gtk_live",
-        country: "Poland",
-        count: features.length,
-        osmBaseTimestamp: data.osm3s?.timestamp_osm_base || null
-      },
-      features
-    };
-
-    return NextResponse.json(payload, {
-      headers: {
-        "Cache-Control": "s-maxage=20, stale-while-revalidate=60"
-      }
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unknown Overpass error";
-
-    return NextResponse.json(
-      {
-        error: "Failed to load live GTK spots from OpenStreetMap",
-        details: message
-      },
-      {
-        status: 502
-      }
+  if (!response.ok) {
+    throw new Error(
+      `Overpass ${endpoint} returned ${response.status}: ${text.slice(0, 1200)}`
     );
   }
+
+  try {
+    return JSON.parse(text) as OverpassResponse;
+  } catch {
+    throw new Error(
+      `Overpass ${endpoint} returned non-JSON response: ${text.slice(0, 1200)}`
+    );
+  }
+}
+
+export async function GET() {
+  const errors: string[] = [];
+
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const data = await fetchOverpass(endpoint);
+
+      const uniqueNodes = new Map<number, OverpassElement>();
+
+      for (const element of data.elements || []) {
+        if (isValidOverpassNode(element)) {
+          uniqueNodes.set(element.id as number, element);
+        }
+      }
+
+      const features = Array.from(uniqueNodes.values()).map(toFeature);
+
+      const payload: FeatureCollection<Point, OsmParkingProperties> & {
+        metadata: {
+          source: string;
+          sourceStatus: string;
+          mode: string;
+          country: string;
+          count: number;
+          osmBaseTimestamp: string | null;
+          overpassEndpoint: string;
+        };
+      } = {
+        type: "FeatureCollection",
+        metadata: {
+          source: "OpenStreetMap live data via Overpass API",
+          sourceStatus: "osm_live_overpass",
+          mode: "country_gtk_live",
+          country: "Poland",
+          count: features.length,
+          osmBaseTimestamp: data.osm3s?.timestamp_osm_base || null,
+          overpassEndpoint: endpoint
+        },
+        features
+      };
+
+      return NextResponse.json(payload, {
+        headers: {
+          "Cache-Control": "s-maxage=20, stale-while-revalidate=60"
+        }
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown Overpass error";
+
+      errors.push(message);
+
+      console.error("[api/osm/gtk-parking] Overpass endpoint failed", {
+        endpoint,
+        message
+      });
+    }
+  }
+
+  return NextResponse.json(
+    {
+      error: "Failed to load live GTK spots from OpenStreetMap",
+      details: errors
+    },
+    {
+      status: 502
+    }
+  );
 }
