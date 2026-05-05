@@ -644,24 +644,24 @@ export function KopertyMap({
     );
   }
 
-  function makeUserAddedMarker(L: LeafletWithCluster, spot: UserAddedSpot) {
-    const icon = L.divIcon({
-      className: `user-added-marker gtk-local-marker ${
-        spot.status === "osm_submitted" ? "gtk-local-marker-submitted" : ""
-      }`,
-      html: `
-        <span class="gtk-marker-icon">♿</span>
-        <small class="gtk-marker-label">GTK</small>
-      `,
-      iconSize: [46, 46],
-      iconAnchor: [23, 23],
-      popupAnchor: [0, -18]
-    });
+function makeUserAddedMarker(L: LeafletWithCluster, spot: UserAddedSpot) {
+  const icon = L.divIcon({
+    className: `user-added-marker gtk-local-marker ${
+      spot.status === "osm_submitted" ? "gtk-local-marker-submitted" : ""
+    } ${showRemoveChooser ? "gtk-local-marker-delete-mode" : ""}`,
+    html: `
+      <span class="gtk-marker-icon">♿</span>
+      <small class="gtk-marker-label">GTK</small>
+    `,
+    iconSize: [46, 46],
+    iconAnchor: [23, 23],
+    popupAnchor: [0, -18]
+  });
 
-    return L.marker([spot.lat, spot.lng], { icon }).bindPopup(
-      buildUserSpotPopupHtml(spot, Boolean(osmUser), sendingSpotId === spot.id)
-    );
-  }
+  return L.marker([spot.lat, spot.lng], { icon }).bindPopup(
+    buildUserSpotPopupHtml(spot, Boolean(osmUser), sendingSpotId === spot.id)
+  );
+}
 
   function createOsmLayer(L: LeafletWithCluster) {
     if (typeof L.markerClusterGroup === "function") {
@@ -699,13 +699,20 @@ export function KopertyMap({
     let markerToOpen: import("leaflet").Marker | null = null;
 
     spots.forEach((spot) => {
-      const marker = makeUserAddedMarker(L, spot);
-      layer.addLayer(marker);
+    const marker = makeUserAddedMarker(L, spot);
 
-      if (pendingUserSpotPopupId.current === spot.id) {
-        markerToOpen = marker;
-      }
-    });
+    if (showRemoveChooser) {
+      marker.on("click", () => {
+        removeUserSpotById(spot.id);
+      });
+    }
+
+    layer.addLayer(marker);
+
+    if (!showRemoveChooser && pendingUserSpotPopupId.current === spot.id) {
+    markerToOpen = marker;
+  }
+  });
 
     layer.addTo(map);
     userAddedLayer.current = layer;
@@ -1008,30 +1015,46 @@ export function KopertyMap({
     }
   }
 
-  function removeUserSpotById(spotId: string) {
-    const removedSpot = userAddedSpots.find((spot) => spot.id === spotId);
-    const next = userAddedSpots.filter((spot) => spot.id !== spotId);
+function removeUserSpotById(spotId: string) {
+  const removedSpot = userAddedSpots.find((spot) => spot.id === spotId);
+  const next = userAddedSpots.filter((spot) => spot.id !== spotId);
 
-    setUserAddedSpots(next);
-    setShowRemoveChooser(next.length > 0);
-    setEditingSpotId(null);
+  setUserAddedSpots(next);
+  setEditingSpotId(null);
+  setShowRemoveChooser(next.length > 0);
 
-    if (removedSpot) {
-      setLocationMessage(
-        `Usunięto lokalny marker ${removedSpot.lat.toFixed(
-          5
-        )}, ${removedSpot.lng.toFixed(5)}.`
-      );
-    } else {
-      setLocationMessage("Usunięto lokalny marker.");
-    }
+  if (removedSpot) {
+    setLocationMessage(
+      `Usunięto kopertę ${removedSpot.lat.toFixed(5)}, ${removedSpot.lng.toFixed(
+        5
+      )}.`
+    );
+  } else {
+    setLocationMessage("Usunięto kopertę.");
   }
 
-  function toggleRemoveChooser() {
-    setAddingMode(false);
-    setEditingSpotId(null);
-    setShowRemoveChooser((current) => !current);
+  if (next.length === 0) {
+    setShowRemoveChooser(false);
+    setLocationMessage("Usunięto ostatnią lokalną kopertę.");
   }
+}
+
+ function toggleRemoveChooser() {
+  setAddingMode(false);
+  setEditingSpotId(null);
+
+  setShowRemoveChooser((current) => {
+    const next = !current;
+
+    setLocationMessage(
+      next
+        ? "Kliknij kopertę, którą chcesz usunąć."
+        : "Tryb usuwania został wyłączony."
+    );
+
+    return next;
+  });
+}
 
   function enableAddingMode() {
     setShowRemoveChooser(false);
@@ -1168,7 +1191,7 @@ export function KopertyMap({
                 onClick={toggleRemoveChooser}
                 type="button"
               >
-                {showRemoveChooser ? "Zamknij wybór" : "Usuń moją kopertę"}
+                {showRemoveChooser ? "Anuluj usuwanie" : "Usuń moją kopertę"}
               </button>
             ) : null}
           </div>
@@ -1214,61 +1237,8 @@ export function KopertyMap({
         </div>
 
         {showRemoveChooser && userAddedSpots.length > 0 ? (
-          <div className="remove-chooser-popover">
-            <div className="remove-chooser-header">
-              <div>
-                <strong>Wybierz kopertę do usunięcia</strong>
-                <span>Usuń tylko wybrany szkic zapisany w tej przeglądarce.</span>
-              </div>
-              <span className="remove-chooser-count">
-                {userAddedSpots.length}
-              </span>
-            </div>
-
-            <div className="remove-chooser-list">
-              {userAddedSpots.map((spot, index) => (
-                <article className="remove-chooser-item" key={spot.id}>
-                  <div className="remove-chooser-main">
-                    <span className="remove-chooser-index">
-                      {index + 1}
-                    </span>
-
-                    <div>
-                      <h3>
-                        {spot.status === "osm_submitted"
-                          ? `Koperta ${index + 1} (wysłana do OSM)`
-                          : `Koperta ${index + 1}`}
-                      </h3>
-                      <p>{formatUserSpotGps(spot)}</p>
-                      <small>Dodano: {formatUserSpotDate(spot)}</small>
-                      <small>
-                        Autor: {spot.addedByName || "użytkownik lokalny"}
-                      </small>
-                    </div>
-                  </div>
-
-                  <div className="remove-chooser-actions">
-                    {spot.status !== "osm_submitted" ? (
-                      <button
-                        type="button"
-                        className="edit-single-button"
-                        onClick={() => startEditingUserSpot(spot.id)}
-                      >
-                        Popraw położenie
-                      </button>
-                    ) : null}
-
-                    <button
-                      type="button"
-                      className="remove-single-button"
-                      onClick={() => removeUserSpotById(spot.id)}
-                    >
-                      Usuń tę kopertę
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
+          <div className="map-delete-hint">
+            Kliknij kopertę, którą chcesz usunąć.
           </div>
         ) : null}
       </div>
