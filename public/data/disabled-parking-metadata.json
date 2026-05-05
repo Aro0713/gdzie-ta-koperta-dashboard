@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-05-05T05:25:42.756237+00:00",
+  "generatedAt": "2026-05-05T16:41:08.173679+00:00",
   "country": "Poland",
-  "strategy": "voivodeship-snapshot",
-  "count": 31048,
-  "exactDisabledParkingSpaces": 18027,
-  "parkingsWithDisabledCapacity": 13021,
+  "strategy": "voivodeship-snapshot-public-access-deduped",
+  "count": 25744,
+  "exactDisabledParkingSpaces": 17009,
+  "parkingsWithDisabledCapacity": 8735,
   "files": {
     "geojson": "public/data/disabled-parking.geojson",
     "geopackage": "data/osm-disabled-parking.gpkg",
@@ -92,5 +92,25 @@
       "place_query": "województwo zachodniopomorskie, Polska"
     }
   ],
-  "note": "OSM-first Poland snapshot generated from OpenStreetMap data via OSMnx/Overpass. User location is used only to filter 5 km in the application."
+  "filters": {
+    "nonPublicAccessValues": [
+      "delivery",
+      "emergency",
+      "military",
+      "no",
+      "permit",
+      "private",
+      "residents"
+    ],
+    "accessKeys": [
+      "access",
+      "vehicle",
+      "motor_vehicle",
+      "motorcar",
+      "foot"
+    ],
+    "parkingSpaceMatchDistanceMeters": 30,
+    "privateAccessInheritDistanceMeters": 25
+  },
+  "note": "OSM-first Poland snapshot generated from OpenStreetMap data via OSMnx/Overpass. User location is used only to filter 5 km in the application. Non-public parking objects are filtered out. Parking objects with mapped exact disabled parking spaces are not displayed as aggregate parking objects."
 }

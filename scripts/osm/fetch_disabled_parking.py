@@ -31,8 +31,30 @@ CAPACITY_DISABLED_BAD_VALUES = {
     "none",
     "false",
     "nan",
-    "null"
+    "null",
 }
+
+NON_PUBLIC_ACCESS_VALUES = {
+    "private",
+    "no",
+    "military",
+    "emergency",
+    "delivery",
+    "residents",
+    "permit",
+}
+
+ACCESS_KEYS = [
+    "access",
+    "vehicle",
+    "motor_vehicle",
+    "motorcar",
+    "foot",
+]
+
+POLAND_PROJECTED_CRS = "EPSG:2180"
+PARKING_SPACE_MATCH_DISTANCE_METERS = 30
+PRIVATE_ACCESS_INHERIT_DISTANCE_METERS = 25
 
 
 def now_iso() -> str:
@@ -67,6 +89,15 @@ def as_text(value: Any) -> str | None:
     return text
 
 
+def normalize_tag_value(value: Any) -> str | None:
+    text = as_text(value)
+
+    if text is None:
+        return None
+
+    return text.strip().lower()
+
+
 def has_useful_disabled_capacity(value: Any) -> bool:
     text = as_text(value)
 
@@ -81,6 +112,207 @@ def safe_get(row: pd.Series, key: str) -> Any:
         return row[key]
 
     return None
+
+
+def is_non_public_access_value(value: Any) -> bool:
+    text = normalize_tag_value(value)
+
+    if text is None:
+        return False
+
+    parts = {
+        part.strip()
+        for part in text.replace(",", ";").split(";")
+        if part.strip()
+    }
+
+    return any(part in NON_PUBLIC_ACCESS_VALUES for part in parts)
+
+
+def row_has_non_public_access(row: pd.Series) -> bool:
+    return any(is_non_public_access_value(safe_get(row, key)) for key in ACCESS_KEYS)
+
+
+def filter_rows_with_public_access(
+    gdf: gpd.GeoDataFrame,
+    label: str,
+) -> gpd.GeoDataFrame:
+    if gdf.empty:
+        return gdf
+
+    keep_positions: list[int] = []
+    removed = 0
+
+    for position, (_, row) in enumerate(gdf.iterrows()):
+        if row_has_non_public_access(row):
+            removed += 1
+            continue
+
+        keep_positions.append(position)
+
+    if removed:
+        print(f"Filtered non-public access from {label}: removed={removed}")
+
+    return gdf.iloc[keep_positions].copy()
+
+
+def to_projected_gdf(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    if gdf.empty:
+        return gdf
+
+    projected = gdf.copy()
+
+    if projected.crs is None:
+        projected = projected.set_crs("EPSG:4326")
+
+    return projected.to_crs(POLAND_PROJECTED_CRS)
+
+
+def is_usable_geometry(geometry: Any) -> bool:
+    try:
+        return geometry is not None and not geometry.is_empty
+    except Exception:
+        return False
+
+
+def geometry_matches_point(
+    geometry: Any,
+    point: Point,
+    max_distance_meters: float,
+) -> bool:
+    if not is_usable_geometry(geometry) or not is_usable_geometry(point):
+        return False
+
+    try:
+        if geometry.contains(point) or geometry.intersects(point):
+            return True
+
+        return geometry.distance(point) <= max_distance_meters
+    except Exception:
+        return False
+
+
+def get_projected_space_points(gdf: gpd.GeoDataFrame) -> list[Point]:
+    if gdf.empty:
+        return []
+
+    projected = to_projected_gdf(gdf)
+    points: list[Point] = []
+
+    for geometry in projected.geometry:
+        point = point_from_geometry(geometry)
+
+        if point is not None:
+            points.append(point)
+
+    return points
+
+
+def filter_disabled_spaces_inside_non_public_parkings(
+    disabled_spaces_gdf: gpd.GeoDataFrame,
+    raw_parking_gdf: gpd.GeoDataFrame,
+    label: str,
+) -> gpd.GeoDataFrame:
+    if disabled_spaces_gdf.empty or raw_parking_gdf.empty:
+        return disabled_spaces_gdf
+
+    non_public_parking_positions: list[int] = []
+
+    for position, (_, row) in enumerate(raw_parking_gdf.iterrows()):
+        if row_has_non_public_access(row):
+            non_public_parking_positions.append(position)
+
+    if not non_public_parking_positions:
+        return disabled_spaces_gdf
+
+    non_public_parkings = raw_parking_gdf.iloc[non_public_parking_positions].copy()
+
+    projected_spaces = to_projected_gdf(disabled_spaces_gdf)
+    projected_private_parkings = to_projected_gdf(non_public_parkings)
+
+    private_geometries = [
+        geometry
+        for geometry in projected_private_parkings.geometry
+        if is_usable_geometry(geometry)
+    ]
+
+    if not private_geometries:
+        return disabled_spaces_gdf
+
+    keep_positions: list[int] = []
+    removed = 0
+
+    for position, geometry in enumerate(projected_spaces.geometry):
+        point = point_from_geometry(geometry)
+
+        if point is None:
+            keep_positions.append(position)
+            continue
+
+        is_inside_private_parking = any(
+            geometry_matches_point(
+                private_geometry,
+                point,
+                PRIVATE_ACCESS_INHERIT_DISTANCE_METERS,
+            )
+            for private_geometry in private_geometries
+        )
+
+        if is_inside_private_parking:
+            removed += 1
+            continue
+
+        keep_positions.append(position)
+
+    if removed:
+        print(
+            f"Filtered disabled spaces inheriting private parking access from {label}: "
+            f"removed={removed}"
+        )
+
+    return disabled_spaces_gdf.iloc[keep_positions].copy()
+
+
+def filter_parkings_covered_by_exact_spaces(
+    parking_gdf: gpd.GeoDataFrame,
+    disabled_spaces_gdf: gpd.GeoDataFrame,
+    label: str,
+) -> gpd.GeoDataFrame:
+    if parking_gdf.empty or disabled_spaces_gdf.empty:
+        return parking_gdf
+
+    projected_parkings = to_projected_gdf(parking_gdf)
+    disabled_space_points = get_projected_space_points(disabled_spaces_gdf)
+
+    if not disabled_space_points:
+        return parking_gdf
+
+    keep_positions: list[int] = []
+    removed = 0
+
+    for position, geometry in enumerate(projected_parkings.geometry):
+        has_exact_space = any(
+            geometry_matches_point(
+                geometry,
+                disabled_space_point,
+                PARKING_SPACE_MATCH_DISTANCE_METERS,
+            )
+            for disabled_space_point in disabled_space_points
+        )
+
+        if has_exact_space:
+            removed += 1
+            continue
+
+        keep_positions.append(position)
+
+    if removed:
+        print(
+            f"Filtered duplicated parking objects with exact disabled spaces from {label}: "
+            f"removed={removed}"
+        )
+
+    return parking_gdf.iloc[keep_positions].copy()
 
 
 def get_osm_type_and_id(row: pd.Series) -> tuple[str, int | None]:
@@ -172,6 +404,9 @@ def normalize_area_features(
     reset = gdf.reset_index()
 
     for _, row in reset.iterrows():
+        if row_has_non_public_access(row):
+            continue
+
         amenity = as_text(safe_get(row, "amenity"))
         parking_space = as_text(safe_get(row, "parking_space"))
         capacity_disabled = as_text(safe_get(row, "capacity:disabled"))
@@ -254,24 +489,46 @@ def build_dataset() -> gpd.GeoDataFrame:
             label=f"{area['id']} capacity:disabled",
         )
 
-        all_records.extend(
-            normalize_area_features(
-                capacity_gdf,
-                area=area,
-                object_type_hint="parking_with_disabled_capacity",
-                synced_at=synced_at,
-            )
-        )
-
         disabled_spaces_gdf = fetch_osmnx_features_for_place(
             area=area,
             tags={"parking_space": "disabled"},
             label=f"{area['id']} parking_space=disabled",
         )
 
+        public_disabled_spaces_gdf = filter_rows_with_public_access(
+            disabled_spaces_gdf,
+            label=f"{area['id']} parking_space=disabled",
+        )
+
+        public_disabled_spaces_gdf = filter_disabled_spaces_inside_non_public_parkings(
+            public_disabled_spaces_gdf,
+            raw_parking_gdf=capacity_gdf,
+            label=f"{area['id']} parking_space=disabled",
+        )
+
+        public_capacity_gdf = filter_rows_with_public_access(
+            capacity_gdf,
+            label=f"{area['id']} capacity:disabled",
+        )
+
+        display_capacity_gdf = filter_parkings_covered_by_exact_spaces(
+            public_capacity_gdf,
+            disabled_spaces_gdf=public_disabled_spaces_gdf,
+            label=f"{area['id']} capacity:disabled",
+        )
+
         all_records.extend(
             normalize_area_features(
-                disabled_spaces_gdf,
+                display_capacity_gdf,
+                area=area,
+                object_type_hint="parking_with_disabled_capacity",
+                synced_at=synced_at,
+            )
+        )
+
+        all_records.extend(
+            normalize_area_features(
+                public_disabled_spaces_gdf,
                 area=area,
                 object_type_hint="disabled_parking_space",
                 synced_at=synced_at,
@@ -359,7 +616,7 @@ def write_outputs(gdf: gpd.GeoDataFrame) -> None:
     metadata = {
         "generatedAt": now_iso(),
         "country": "Poland",
-        "strategy": "voivodeship-snapshot",
+        "strategy": "voivodeship-snapshot-public-access-deduped",
         "count": int(len(gdf)),
         "exactDisabledParkingSpaces": exact_count,
         "parkingsWithDisabledCapacity": parking_count,
@@ -369,7 +626,19 @@ def write_outputs(gdf: gpd.GeoDataFrame) -> None:
             "geoparquet": str(PARQUET_OUT.relative_to(ROOT)).replace("\\", "/"),
         },
         "areas": load_areas(),
-        "note": "OSM-first Poland snapshot generated from OpenStreetMap data via OSMnx/Overpass. User location is used only to filter 5 km in the application."
+        "filters": {
+            "nonPublicAccessValues": sorted(NON_PUBLIC_ACCESS_VALUES),
+            "accessKeys": ACCESS_KEYS,
+            "parkingSpaceMatchDistanceMeters": PARKING_SPACE_MATCH_DISTANCE_METERS,
+            "privateAccessInheritDistanceMeters": PRIVATE_ACCESS_INHERIT_DISTANCE_METERS,
+        },
+        "note": (
+            "OSM-first Poland snapshot generated from OpenStreetMap data via "
+            "OSMnx/Overpass. User location is used only to filter 5 km in the "
+            "application. Non-public parking objects are filtered out. Parking "
+            "objects with mapped exact disabled parking spaces are not displayed "
+            "as aggregate parking objects."
+        ),
     }
 
     print(f"Writing metadata: {METADATA_OUT}")
