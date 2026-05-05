@@ -1157,7 +1157,10 @@ function removeUserSpotById(spotId: string) {
         aria-label="Mapa kopert"
       />
 
-            <div className="map-toolbar map-toolbar-compact" aria-live="polite">
+                 <div
+        className="map-toolbar map-toolbar-compact map-toolbar-topbar"
+        aria-live="polite"
+      >
         <div className="map-toolbar-compact-bar">
           <div className="map-toolbar-compact-left">
             <button
@@ -1165,8 +1168,9 @@ function removeUserSpotById(spotId: string) {
               onClick={() => locateUserAndLoadOsm(radiusMeters)}
               type="button"
               disabled={loadingOsm}
+              title="Pobierz lokalizację"
             >
-              {loadingOsm ? "Szukam…" : "Pobierz lokalizację"}
+              {loadingOsm ? "Szukam…" : "Lokalizacja"}
             </button>
 
             <button
@@ -1175,12 +1179,9 @@ function removeUserSpotById(spotId: string) {
               } ${userAddedSpots.length > 0 ? "map-btn-add-ready" : ""}`}
               onClick={enableAddingMode}
               type="button"
+              title="Dodaj kopertę na mapie"
             >
-              {addingMode
-                ? "Kliknij na mapie"
-                : userAddedSpots.length > 0
-                  ? "Dodaj kolejną kopertę"
-                  : "Dodaj kopertę"}
+              {addingMode ? "Kliknij mapę" : "Dodaj kopertę"}
             </button>
 
             {userAddedSpots.length > 0 ? (
@@ -1190,14 +1191,19 @@ function removeUserSpotById(spotId: string) {
                 }`}
                 onClick={toggleRemoveChooser}
                 type="button"
+                title={
+                  showRemoveChooser
+                    ? "Anuluj usuwanie koperty"
+                    : "Usuń jedną z moich kopert"
+                }
               >
-                {showRemoveChooser ? "Anuluj usuwanie" : "Usuń moją kopertę"}
+                {showRemoveChooser ? "Anuluj" : "Usuń"}
               </button>
             ) : null}
           </div>
 
           <div className="map-toolbar-compact-right">
-            <div className="map-radius-inline">
+            <div className="map-radius-inline" aria-label="Obszar wyszukiwania">
               <span className="map-radius-inline-min">100 m</span>
 
               <input
@@ -1231,7 +1237,7 @@ function removeUserSpotById(spotId: string) {
               <span className="map-status-pill">♿ OSM: {exactOsmCount}</span>
               <span className="map-status-pill">P: {parkingOsmCount}</span>
               <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
-              <span className="map-status-pill">Razem OSM: {osmCount}</span>
+              <span className="map-status-pill">Razem: {osmCount}</span>
             </div>
           </div>
         </div>
