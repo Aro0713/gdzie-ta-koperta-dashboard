@@ -2141,3 +2141,38 @@ textarea {
     transform: translateX(130%);
   }
 }
+.legal-panel {
+  margin-top: 18px;
+}
+
+.legal-content {
+  max-width: 860px;
+  line-height: 1.65;
+}
+
+.legal-content h2 {
+  margin-top: 28px;
+  margin-bottom: 10px;
+  font-size: 1.25rem;
+}
+
+.legal-content p,
+.legal-content li {
+  color: #344054;
+}
+
+.legal-content ul {
+  margin: 10px 0 0;
+  padding-left: 22px;
+}
+
+.legal-content li + li {
+  margin-top: 8px;
+}
+
+.legal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 30px;
+}

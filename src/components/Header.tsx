@@ -18,6 +18,7 @@ export function Header() {
       <nav className="top-nav" aria-label="Główna nawigacja">
         <Link href="/mapa">Mapa</Link>
         <Link href="/zespol">Zespół</Link>
+        <Link href="/polityka-cookies">Cookies</Link>
 
         <a
           href={FACEBOOK_URL}
