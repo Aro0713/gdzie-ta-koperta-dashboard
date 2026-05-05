@@ -134,7 +134,17 @@ textarea {
   color: var(--blue-dark);
   background: rgba(20, 119, 212, 0.09);
 }
+.top-nav .facebook-nav-link {
+  color: white;
+  background: linear-gradient(135deg, var(--blue), var(--cyan));
+  box-shadow: 0 10px 26px rgba(20, 119, 212, 0.24);
+}
 
+.top-nav .facebook-nav-link:hover {
+  color: white;
+  background: linear-gradient(135deg, var(--blue-dark), var(--blue));
+  box-shadow: 0 14px 34px rgba(20, 119, 212, 0.32);
+}
 .hero-card {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
