@@ -7,77 +7,64 @@ import { KopertyMap, type UserAddedSpot } from "@/components/KopertyMap";
 import { StatsCards, type StatsCardItem } from "@/components/StatsCards";
 import type { OsmParkingResponse } from "@/lib/osmParking";
 
-type GtkCountryStats = {
-  total: number;
-  confirmed: number;
-  toVerify: number;
-};
-
-type GtkCountryStatsResponse = Partial<GtkCountryStats> & {
-  error?: string;
-};
-
-function toSafeNumber(value: unknown) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : 0;
-}
-
 export function DashboardHome() {
   const [osmData, setOsmData] = useState<OsmParkingResponse | null>(null);
   const [userSpots, setUserSpots] = useState<UserAddedSpot[]>([]);
 
-  const [gtkCountryStats, setGtkCountryStats] =
-    useState<GtkCountryStats | null>(null);
-  const [loadingGtkCountryStats, setLoadingGtkCountryStats] = useState(true);
-  const [gtkCountryStatsError, setGtkCountryStatsError] = useState(false);
+  const [gtkLiveData, setGtkLiveData] = useState<OsmParkingResponse | null>(
+    null
+  );
+  const [loadingGtkLiveData, setLoadingGtkLiveData] = useState(true);
+  const [gtkLiveDataError, setGtkLiveDataError] = useState(false);
 
   useEffect(() => {
     let active = true;
+    let intervalId: number | null = null;
 
-    async function loadGtkCountryStats() {
-      setLoadingGtkCountryStats(true);
-      setGtkCountryStatsError(false);
+    async function loadGtkLiveData() {
+      setGtkLiveDataError(false);
 
       try {
-        const response = await fetch("/api/gtk-spots/stats", {
+        const response = await fetch("/api/osm/gtk-parking", {
           cache: "no-store"
         });
 
-        const data = (await response.json()) as GtkCountryStatsResponse;
+        const data = (await response.json()) as OsmParkingResponse;
 
         if (!response.ok || data.error) {
-          throw new Error(
-            data.error || "Nie udało się pobrać krajowych statystyk GTK."
-          );
+          throw new Error(data.error || "Nie udało się pobrać GTK z OSM.");
         }
 
         if (!active) {
           return;
         }
 
-        setGtkCountryStats({
-          total: toSafeNumber(data.total),
-          confirmed: toSafeNumber(data.confirmed),
-          toVerify: toSafeNumber(data.toVerify)
-        });
+        setGtkLiveData(data);
       } catch {
         if (!active) {
           return;
         }
 
-        setGtkCountryStats(null);
-        setGtkCountryStatsError(true);
+        setGtkLiveDataError(true);
       } finally {
         if (active) {
-          setLoadingGtkCountryStats(false);
+          setLoadingGtkLiveData(false);
         }
       }
     }
 
-    void loadGtkCountryStats();
+    void loadGtkLiveData();
+
+    intervalId = window.setInterval(() => {
+      void loadGtkLiveData();
+    }, 30000);
 
     return () => {
       active = false;
+
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
     };
   }, []);
 
@@ -93,6 +80,12 @@ export function DashboardHome() {
         feature.properties?.objectType === "parking_with_disabled_capacity"
     ).length;
   }, [osmData]);
+
+  const confirmedUserSpots = useMemo(() => {
+    return userSpots.filter((spot) => (spot.confirmations || 0) >= 5).length;
+  }, [userSpots]);
+
+  const userSpotsToVerify = Math.max(userSpots.length - confirmedUserSpots, 0);
 
   const visibleFeatures = useMemo(() => {
     return [...(osmData?.features || [])]
@@ -116,29 +109,52 @@ export function DashboardHome() {
       .slice(0, 18);
   }, [osmData]);
 
-  const gtkCountryTotalValue: string | number = loadingGtkCountryStats
-    ? "…"
-    : gtkCountryStatsError
-      ? "—"
-      : gtkCountryStats?.total ?? 0;
+  const gtkLiveOsmIds = useMemo(() => {
+    const ids = new Set<string>();
 
-  const gtkConfirmedValue: string | number = loadingGtkCountryStats
-    ? "…"
-    : gtkCountryStatsError
-      ? "—"
-      : gtkCountryStats?.confirmed ?? 0;
+    for (const feature of gtkLiveData?.features || []) {
+      const osmId = feature.properties?.osmId;
 
-  const gtkToVerifyValue: string | number = loadingGtkCountryStats
-    ? "…"
-    : gtkCountryStatsError
-      ? "—"
-      : gtkCountryStats?.toVerify ?? 0;
+      if (osmId) {
+        ids.add(String(osmId));
+      }
+    }
 
-  const gtkCountryDetail = loadingGtkCountryStats
-    ? "liczę koperty dodane w całej Polsce"
-    : gtkCountryStatsError
-      ? "brak krajowych statystyk GTK"
-      : "dodane przez użytkowników aplikacji w całej Polsce";
+    return ids;
+  }, [gtkLiveData]);
+
+  const localSubmittedGtkNotYetInLiveOsm = useMemo(() => {
+    return userSpots.filter((spot) => {
+      return (
+        spot.status === "osm_submitted" &&
+        Boolean(spot.osmNodeId) &&
+        !gtkLiveOsmIds.has(String(spot.osmNodeId))
+      );
+    }).length;
+  }, [gtkLiveOsmIds, userSpots]);
+
+  const gtkLiveCount =
+    gtkLiveData?.metadata?.count ?? gtkLiveData?.features?.length ?? 0;
+
+  const gtkCountryCount = gtkLiveCount + localSubmittedGtkNotYetInLiveOsm;
+
+  const gtkCountryValue: string | number =
+    loadingGtkLiveData && !gtkLiveData
+      ? "…"
+      : gtkLiveDataError && !gtkLiveData
+        ? "—"
+        : gtkCountryCount;
+
+  const gtkCountryDetail =
+    loadingGtkLiveData && !gtkLiveData
+      ? "pobieram koperty GTK z OpenStreetMap"
+      : gtkLiveDataError && !gtkLiveData
+        ? "brak live danych GTK z OSM"
+        : gtkLiveDataError
+          ? "ostatnie dane live z OSM, odświeżenie nieudane"
+          : localSubmittedGtkNotYetInLiveOsm > 0
+            ? `OSM live + ${localSubmittedGtkNotYetInLiveOsm} świeżo wysłane z tej sesji`
+            : "dodane przez użytkowników GTK w OpenStreetMap";
 
   const totalKopertyInVisibleArea = osmExactKoperty + userSpots.length;
 
@@ -150,19 +166,19 @@ export function DashboardHome() {
     },
     {
       label: "nowe koperty GTK",
-      value: gtkCountryTotalValue,
+      value: gtkCountryValue,
       detail: gtkCountryDetail,
       href: "/mapa?widok=gtk-kraj"
     },
     {
       label: "potwierdzone",
-      value: gtkConfirmedValue,
-      detail: "GTK w całej Polsce po 5 potwierdzeniach"
+      value: confirmedUserSpots,
+      detail: "lokalne szkice GTK po 5 potwierdzeniach"
     },
     {
       label: "do sprawdzenia",
-      value: gtkToVerifyValue,
-      detail: "GTK w całej Polsce czekające na społeczność"
+      value: userSpotsToVerify,
+      detail: "lokalne szkice GTK czekające na społeczność"
     }
   ];
 

@@ -101,6 +101,8 @@ function buildNodeXml(changesetId: string, lat: number, lng: number) {
   )}" lon="${xmlEscape(formatCoordinate(lng))}">
     <tag k="amenity" v="parking_space"/>
     <tag k="parking_space" v="disabled"/>
+    <tag k="source" v="survey"/>
+    <tag k="survey:tool" v="GdzieTaKoperta"/>
   </node>
 </osm>`;
 }

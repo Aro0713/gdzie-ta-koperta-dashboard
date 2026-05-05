@@ -225,11 +225,110 @@ function countByType(features: SnapshotFeature[]) {
     parkingsWithDisabledCapacity
   };
 }
+function isGtkFeature(feature: SnapshotFeature) {
+  const tags = feature.properties?.tags || {};
 
+  const candidates = [
+    tags["survey:tool"],
+    tags["source:application"],
+    tags["created_by"],
+    tags["created_by:app"],
+    tags["source"],
+    feature.properties?.source,
+    feature.properties?.sourceStatus
+  ];
+
+  return candidates.some((value) => {
+    return (
+      typeof value === "string" &&
+      /gdzie\s*ta\s*koperta|gdzietakoperta|gtk/i.test(value)
+    );
+  });
+}
+
+function hasValidPointGeometry(feature: SnapshotFeature) {
+  return Boolean(getFeatureLatLng(feature));
+}
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
   try {
+    const scope = searchParams.get("scope");
+    const sourceFilter = searchParams.get("source");
+
+    const [snapshot, snapshotMetadata] = await Promise.all([
+      loadSnapshot(),
+      loadSnapshotMetadata()
+    ]);
+
+    if (scope === "country") {
+      const countryFeatures = snapshot.features
+        .filter((feature): feature is SnapshotFeature => {
+          if (!hasValidPointGeometry(feature)) {
+            return false;
+          }
+
+          if (sourceFilter === "gtk") {
+            return isGtkFeature(feature);
+          }
+
+          return true;
+        })
+        .sort((a, b) => {
+          const firstType =
+            a.properties?.objectType === "disabled_parking_space" ? 0 : 1;
+          const secondType =
+            b.properties?.objectType === "disabled_parking_space" ? 0 : 1;
+
+          if (firstType !== secondType) {
+            return firstType - secondType;
+          }
+
+          const firstId = String(a.properties?.osmId || "");
+          const secondId = String(b.properties?.osmId || "");
+
+          return firstId.localeCompare(secondId);
+        });
+
+      const typeCounts = countByType(countryFeatures);
+
+      return NextResponse.json(
+        {
+          type: "FeatureCollection",
+          metadata: {
+            source: "OpenStreetMap snapshot generated via OSMnx/Overpass",
+            sourceStatus:
+              sourceFilter === "gtk" ? "gtk_osm_snapshot" : "osm_snapshot",
+            mode:
+              sourceFilter === "gtk"
+                ? "country_gtk_snapshot"
+                : "country_snapshot",
+            generatedAt: snapshotMetadata.generatedAt || null,
+            country: snapshotMetadata.country || "Poland",
+            strategy: snapshotMetadata.strategy || "voivodeship-snapshot",
+            count: countryFeatures.length,
+            snapshotCount: snapshotMetadata.count ?? snapshot.features.length,
+            exactDisabledParkingSpaces:
+              typeCounts.exactDisabledParkingSpaces,
+            parkingsWithDisabledCapacity:
+              typeCounts.parkingsWithDisabledCapacity,
+            snapshotTotals: {
+              exactDisabledParkingSpaces:
+                snapshotMetadata.exactDisabledParkingSpaces ?? null,
+              parkingsWithDisabledCapacity:
+                snapshotMetadata.parkingsWithDisabledCapacity ?? null
+            }
+          },
+          features: countryFeatures
+        },
+        {
+          headers: {
+            "Cache-Control": "s-maxage=3600, stale-while-revalidate=86400"
+          }
+        }
+      );
+    }
+
     const lat = parseCoordinate(searchParams.get("lat"), "lat");
     const lng = parseCoordinate(searchParams.get("lng"), "lng");
     const radius = clampRadius(searchParams.get("radius"));
@@ -237,11 +336,6 @@ export async function GET(request: NextRequest) {
     if (!isValidLatLng(lat, lng)) {
       return jsonError("Invalid latitude or longitude range", 400);
     }
-
-    const [snapshot, snapshotMetadata] = await Promise.all([
-      loadSnapshot(),
-      loadSnapshotMetadata()
-    ]);
 
     const features = snapshot.features
       .map((feature) => withDistance(feature, lat, lng))
