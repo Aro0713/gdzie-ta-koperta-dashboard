@@ -225,6 +225,89 @@ function countByType(features: SnapshotFeature[]) {
     parkingsWithDisabledCapacity
   };
 }
+const DEFINITELY_NON_PUBLIC_ACCESS_VALUES = new Set([
+  "private",
+  "no",
+  "military",
+  "emergency",
+  "delivery",
+  "residents",
+  "permit"
+]);
+
+function normalizeTagValue(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  return normalized || null;
+}
+
+function getFeatureAccessValue(feature: SnapshotFeature) {
+  const tags = feature.properties?.tags || {};
+
+  return (
+    normalizeTagValue(feature.properties?.access) ||
+    normalizeTagValue(tags.access) ||
+    normalizeTagValue(tags.vehicle) ||
+    normalizeTagValue(tags.motor_vehicle) ||
+    normalizeTagValue(tags.foot)
+  );
+}
+
+function isPubliclyDisplayableFeature(feature: SnapshotFeature) {
+  const access = getFeatureAccessValue(feature);
+
+  if (!access) {
+    return true;
+  }
+
+  return !DEFINITELY_NON_PUBLIC_ACCESS_VALUES.has(access);
+}
+
+function getFeatureAreaId(feature: SnapshotFeature) {
+  const areaId = feature.properties?.areaId;
+
+  if (!areaId) {
+    return null;
+  }
+
+  return String(areaId);
+}
+
+function filterDisplayableFeatures(features: SnapshotFeature[]) {
+  const publicFeatures = features.filter(isPubliclyDisplayableFeature);
+
+  const areasWithExactDisabledSpaces = new Set<string>();
+
+  for (const feature of publicFeatures) {
+    if (feature.properties?.objectType !== "disabled_parking_space") {
+      continue;
+    }
+
+    const areaId = getFeatureAreaId(feature);
+
+    if (areaId) {
+      areasWithExactDisabledSpaces.add(areaId);
+    }
+  }
+
+  return publicFeatures.filter((feature) => {
+    if (feature.properties?.objectType !== "parking_with_disabled_capacity") {
+      return true;
+    }
+
+    const areaId = getFeatureAreaId(feature);
+
+    if (!areaId) {
+      return true;
+    }
+
+    return !areasWithExactDisabledSpaces.has(areaId);
+  });
+}
 function isGtkFeature(feature: SnapshotFeature) {
   const tags = feature.properties?.tags || {};
 
@@ -260,9 +343,12 @@ export async function GET(request: NextRequest) {
       loadSnapshot(),
       loadSnapshotMetadata()
     ]);
+    const displayableSnapshotFeatures = filterDisplayableFeatures(
+      snapshot.features
+    );
 
     if (scope === "country") {
-      const countryFeatures = snapshot.features
+      const countryFeatures = displayableSnapshotFeatures
         .filter((feature): feature is SnapshotFeature => {
           if (!hasValidPointGeometry(feature)) {
             return false;
@@ -337,7 +423,7 @@ export async function GET(request: NextRequest) {
       return jsonError("Invalid latitude or longitude range", 400);
     }
 
-    const features = snapshot.features
+    const features = displayableSnapshotFeatures
       .map((feature) => withDistance(feature, lat, lng))
       .filter((feature): feature is SnapshotFeature => {
         return Boolean(

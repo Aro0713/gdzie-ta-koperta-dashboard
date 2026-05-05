@@ -292,20 +292,11 @@ function buildUserSpotPopupHtml(
           !isSubmitted
             ? `<button
                 type="button"
-                class="gtk-popup-button gtk-popup-button-confirm"
-                data-gtk-spot-action="confirm"
-                data-gtk-spot-id="${escapeHtml(spot.id)}"
-              >
-                Potwierdź
-              </button>
-
-              <button
-                type="button"
                 class="gtk-popup-button gtk-popup-button-edit"
                 data-gtk-spot-action="edit"
                 data-gtk-spot-id="${escapeHtml(spot.id)}"
               >
-                Edytuj położenie
+                Popraw położenie
               </button>`
             : ""
         }
@@ -429,10 +420,34 @@ export function KopertyMap({
 
       leafletMap.current = map;
 
-      L.tileLayer(appConfig.tileUrl, {
+      const osmBaseLayer = L.tileLayer(appConfig.tileUrl, {
         attribution: appConfig.tileAttribution,
         maxZoom: 19
-      }).addTo(map);
+      });
+
+      const satelliteBaseLayer = L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        {
+          attribution:
+            "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics and the GIS User Community",
+          maxZoom: 19
+        }
+      );
+
+      osmBaseLayer.addTo(map);
+
+      L.control
+        .layers(
+          {
+            "Mapa OSM": osmBaseLayer,
+            "Satelita": satelliteBaseLayer
+          },
+          undefined,
+          {
+            collapsed: !full
+          }
+        )
+        .addTo(map);
 
       const localSpots = readLocalUserSpots();
       userSpotsHydrated.current = true;
@@ -582,8 +597,16 @@ export function KopertyMap({
       osmLayer.current = null;
     }
   }
+  function keepUserLocationVisible() {
+    if (userMarker.current) {
+      userMarker.current.setZIndexOffset(1000);
+    }
 
-  function clearUserAddedLayer(forcedMap?: import("leaflet").Map) {
+    if (userCircle.current) {
+      userCircle.current.bringToFront();
+    }
+  }
+    function clearUserAddedLayer(forcedMap?: import("leaflet").Map) {
     const map = forcedMap || leafletMap.current;
 
     if (map && userAddedLayer.current) {
@@ -686,6 +709,7 @@ export function KopertyMap({
 
     layer.addTo(map);
     userAddedLayer.current = layer;
+    keepUserLocationVisible();
 
     if (markerToOpen) {
       window.setTimeout(() => {
@@ -850,7 +874,7 @@ export function KopertyMap({
       addedByOsmId: osmUser?.id
     };
 
-    pendingUserSpotPopupId.current = newSpot.id;
+    pendingUserSpotPopupId.current = null;
     setShowRemoveChooser(false);
     setEditingSpotId(null);
     setUserAddedSpots((current) => [newSpot, ...current]);
@@ -1057,9 +1081,12 @@ export function KopertyMap({
             iconAnchor: [13, 13]
           });
 
-          userMarker.current = L.marker([lat, lng], { icon: userIcon })
-            .addTo(map)
-            .bindPopup("Twoja lokalizacja");
+          userMarker.current = L.marker([lat, lng], {
+          icon: userIcon,
+          zIndexOffset: 1000
+        })
+          .addTo(map)
+          .bindPopup("Twoja lokalizacja");
         }
 
         if (userCircle.current) {
@@ -1082,6 +1109,7 @@ export function KopertyMap({
         });
 
         void fetchOsmParking(lat, lng, safeRadius);
+        keepUserLocationVisible();
       },
       () => {
         setLocationMessage(
@@ -1261,13 +1289,6 @@ export function KopertyMap({
                           {sendingSpotId === spot.id ? "Wysyłam…" : "Wyślij do OSM"}
                         </button>
 
-                        <button
-                          type="button"
-                          className="confirm-single-button"
-                          onClick={() => confirmUserSpotById(spot.id)}
-                        >
-                          Potwierdź
-                        </button>
 
                         <button
                           type="button"

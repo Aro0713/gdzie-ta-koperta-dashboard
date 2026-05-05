@@ -35,6 +35,42 @@ const OVERPASS_ENDPOINTS = [
  */
 const POLAND_BBOX = "49.0,14.0,55.2,24.5";
 
+const DEFINITELY_NON_PUBLIC_ACCESS_VALUES = new Set([
+  "private",
+  "no",
+  "military",
+  "emergency",
+  "delivery",
+  "residents",
+  "permit"
+]);
+
+function normalizeTagValue(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  return normalized || null;
+}
+
+function isPubliclyAccessibleOverpassElement(element: OverpassElement) {
+  const tags = element.tags || {};
+
+  const access =
+    normalizeTagValue(tags.access) ||
+    normalizeTagValue(tags.vehicle) ||
+    normalizeTagValue(tags.motor_vehicle) ||
+    normalizeTagValue(tags.foot);
+
+  if (!access) {
+    return true;
+  }
+
+  return !DEFINITELY_NON_PUBLIC_ACCESS_VALUES.has(access);
+}
+
 function getQueryMode(request: NextRequest): QueryMode {
   const { searchParams } = new URL(request.url);
   return searchParams.get("mode") === "ids" ? "ids" : "features";
@@ -140,8 +176,17 @@ export async function GET(request: NextRequest) {
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
-      const data = await fetchOverpass(endpoint, mode);
-      const osmNodeIds = getUniqueNodeIds(data);
+    const data = await fetchOverpass(endpoint, mode);
+    const publicElements = (data.elements || []).filter(
+    isPubliclyAccessibleOverpassElement
+    );
+
+    const filteredData: OverpassResponse = {
+    ...data,
+    elements: publicElements
+    };
+
+    const osmNodeIds = getUniqueNodeIds(filteredData);
 
       if (mode === "ids") {
         return NextResponse.json(
@@ -169,7 +214,7 @@ export async function GET(request: NextRequest) {
 
       const uniqueNodes = new Map<number, OverpassElement>();
 
-      for (const element of data.elements || []) {
+      for (const element of publicElements) {
         if (isValidOverpassNode(element)) {
           uniqueNodes.set(element.id as number, element);
         }
