@@ -11,6 +11,24 @@ type GtkLiveIndexResponse = OsmParkingResponse & {
   osmNodeIds?: Array<string | number>;
 };
 
+type AiCandidate = {
+  id: string;
+  status: string;
+  lat: number;
+  lng: number;
+  confidence: number;
+  modelVersion: string;
+  imagerySource?: string | null;
+  thumbnailUrl?: string | null;
+  createdAt: string;
+};
+
+type AiCandidatesResponse = {
+  ok?: boolean;
+  candidates?: AiCandidate[];
+  error?: string;
+};
+
 export function DashboardHome() {
   const [osmData, setOsmData] = useState<OsmParkingResponse | null>(null);
   const [userSpots, setUserSpots] = useState<UserAddedSpot[]>([]);
@@ -20,6 +38,10 @@ export function DashboardHome() {
   );
   const [loadingGtkLiveData, setLoadingGtkLiveData] = useState(true);
   const [gtkLiveDataError, setGtkLiveDataError] = useState(false);
+
+  const [aiCandidates, setAiCandidates] = useState<AiCandidate[]>([]);
+  const [loadingAiCandidates, setLoadingAiCandidates] = useState(true);
+  const [aiCandidatesError, setAiCandidatesError] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -62,6 +84,58 @@ export function DashboardHome() {
     intervalId = window.setInterval(() => {
       void loadGtkLiveData();
     }, 30000);
+
+    return () => {
+      active = false;
+
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let intervalId: number | null = null;
+
+    async function loadAiCandidates() {
+      setAiCandidatesError(false);
+
+      try {
+        const response = await fetch("/api/ai-candidates", {
+          cache: "no-store"
+        });
+
+        const data = (await response.json()) as AiCandidatesResponse;
+
+        if (!response.ok || !data.ok || data.error) {
+          throw new Error(data.error || "Nie udało się pobrać kandydatów AI.");
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setAiCandidates(data.candidates || []);
+      } catch {
+        if (!active) {
+          return;
+        }
+
+        setAiCandidates([]);
+        setAiCandidatesError(true);
+      } finally {
+        if (active) {
+          setLoadingAiCandidates(false);
+        }
+      }
+    }
+
+    void loadAiCandidates();
+
+    intervalId = window.setInterval(() => {
+      void loadAiCandidates();
+    }, 60000);
 
     return () => {
       active = false;
@@ -169,6 +243,18 @@ export function DashboardHome() {
             ? `OSM live + ${localSubmittedGtkNotYetInLiveOsm} świeżo wysłane z tej sesji`
             : "dodane przez użytkowników GTK w OpenStreetMap";
 
+  const aiCandidatesValue: string | number = loadingAiCandidates
+    ? "…"
+    : aiCandidatesError
+      ? "—"
+      : aiCandidates.length;
+
+  const aiCandidatesDetail = loadingAiCandidates
+    ? "pobieram kandydatów z Neon"
+    : aiCandidatesError
+      ? "brak danych kandydatów AI"
+      : "wykryte przez crawlera i czekające na weryfikację";
+
   const totalKopertyInVisibleArea = osmExactKoperty + userSpots.length;
 
   const stats: StatsCardItem[] = [
@@ -198,6 +284,30 @@ export function DashboardHome() {
   return (
     <>
       <StatsCards items={stats} />
+
+      <Link
+        href="/mapa?widok=gtk-kraj"
+        className="dashboard-ai-candidates-card"
+        aria-label={`Kandydaci AI GTK: ${aiCandidatesValue}. ${aiCandidatesDetail}`}
+      >
+        <div className="dashboard-ai-candidates-main">
+          <span className="dashboard-ai-candidates-badge">AI</span>
+
+          <div>
+            <p className="eyebrow">kandydaci AI</p>
+            <h2>Kandydaci AI GTK</h2>
+            <p>
+              Crawler wykrył potencjalne koperty na ortofotomapie. Kliknij, aby
+              zobaczyć je na mapie i zweryfikować przed wysłaniem do OSM.
+            </p>
+          </div>
+        </div>
+
+        <div className="dashboard-ai-candidates-counter">
+          <strong>{aiCandidatesValue}</strong>
+          <span>{aiCandidatesDetail}</span>
+        </div>
+      </Link>
 
       <section className="dashboard-map-wide">
         <div className="panel panel-large dashboard-map-panel">
@@ -243,6 +353,7 @@ export function DashboardHome() {
               P: {osmParkingWithDisabledCapacity}
             </span>
             <span className="map-status-pill">GTK lokalnie: {userSpots.length}</span>
+            <span className="map-status-pill">AI GTK: {aiCandidates.length}</span>
           </div>
         </div>
 

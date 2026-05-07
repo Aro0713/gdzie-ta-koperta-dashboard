@@ -2973,3 +2973,172 @@ textarea {
     font-size: 1rem !important;
   }
 }
+/* --- GTK: AI candidates dashboard card --- */
+
+.dashboard-ai-candidates-card {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  gap: 22px;
+  align-items: center;
+  margin-top: 18px;
+  padding: 22px 24px;
+  overflow: hidden;
+  border: 1px solid rgba(124, 58, 237, 0.28);
+  border-radius: var(--radius-xl);
+  color: inherit;
+  text-decoration: none;
+  background:
+    radial-gradient(circle at top left, rgba(192, 38, 211, 0.22), transparent 28rem),
+    linear-gradient(
+      135deg,
+      rgba(124, 58, 237, 0.14),
+      rgba(192, 38, 211, 0.2),
+      rgba(245, 232, 255, 0.92),
+      rgba(124, 58, 237, 0.12)
+    );
+  background-size: 260% 260%;
+  box-shadow:
+    0 22px 70px rgba(88, 28, 135, 0.16),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.34);
+  backdrop-filter: blur(18px);
+  animation: gtkPurplePanelShimmer 5.2s ease-in-out infinite;
+}
+
+.dashboard-ai-candidates-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      110deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0) 34%,
+      rgba(255, 255, 255, 0.58) 50%,
+      rgba(255, 255, 255, 0) 66%,
+      transparent 100%
+    );
+  transform: translateX(-130%);
+  animation: gtkPurplePanelSheen 3.6s ease-in-out infinite;
+}
+
+.dashboard-ai-candidates-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.dashboard-ai-candidates-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 28px 82px rgba(88, 28, 135, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.42);
+}
+
+.dashboard-ai-candidates-main {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+.dashboard-ai-candidates-badge {
+  display: grid;
+  flex: 0 0 auto;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border-radius: 22px;
+  color: white;
+  background: linear-gradient(135deg, #7c3aed, #c026d3);
+  box-shadow: 0 16px 42px rgba(124, 58, 237, 0.3);
+  font-weight: 1000;
+  letter-spacing: -0.04em;
+}
+
+.dashboard-ai-candidates-main h2 {
+  margin-bottom: 6px;
+  color: #231033;
+}
+
+.dashboard-ai-candidates-main p:not(.eyebrow) {
+  max-width: 760px;
+  margin: 0;
+  color: #4b315f;
+  line-height: 1.48;
+}
+
+.dashboard-ai-candidates-counter {
+  display: grid;
+  min-width: 170px;
+  justify-items: end;
+  gap: 4px;
+  text-align: right;
+}
+
+.dashboard-ai-candidates-counter strong {
+  color: #231033;
+  font-size: 2.35rem;
+  line-height: 1;
+  letter-spacing: -0.06em;
+}
+
+.dashboard-ai-candidates-counter span {
+  color: #5b3c70;
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+@keyframes gtkPurplePanelShimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes gtkPurplePanelSheen {
+  0%,
+  22% {
+    transform: translateX(-130%);
+  }
+
+  58% {
+    transform: translateX(130%);
+  }
+
+  100% {
+    transform: translateX(130%);
+  }
+}
+
+@media (max-width: 760px) {
+  .dashboard-ai-candidates-card {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 18px;
+    border-radius: 22px;
+  }
+
+  .dashboard-ai-candidates-main {
+    align-items: flex-start;
+  }
+
+  .dashboard-ai-candidates-badge {
+    width: 48px;
+    height: 48px;
+    border-radius: 18px;
+  }
+
+  .dashboard-ai-candidates-counter {
+    justify-items: start;
+    text-align: left;
+  }
+}
