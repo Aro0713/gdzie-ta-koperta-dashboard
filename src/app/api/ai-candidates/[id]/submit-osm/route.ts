@@ -27,6 +27,14 @@ type SendToOsmResponse = {
   osmUrl: string;
 };
 
+const ALLOWED_OBJECT_TAGS = new Set([
+  "surface",
+  "access",
+  "wheelchair",
+  "wheelchair:description",
+  "wheelchair:description:pl"
+]);
+
 function jsonError(message: string, status = 400, details?: unknown) {
   return NextResponse.json(
     {
@@ -62,14 +70,25 @@ function hasWriteApi(scope?: string) {
 }
 
 function normalizeOsmTags(candidateTags: Record<string, string> | null) {
-  return {
-    ...(candidateTags || {}),
+  const tags: Record<string, string> = {
     amenity: "parking_space",
     parking_space: "disabled",
-    source: "survey",
-    "survey:tool": "GdzieTaKoperta",
     check_date: formatOsmDate()
   };
+
+  for (const [key, value] of Object.entries(candidateTags || {})) {
+    if (!ALLOWED_OBJECT_TAGS.has(key)) {
+      continue;
+    }
+
+    if (typeof value !== "string" || !value.trim()) {
+      continue;
+    }
+
+    tags[key] = value.trim();
+  }
+
+  return tags;
 }
 
 async function osmRequest(
@@ -101,7 +120,7 @@ async function osmRequest(
   return text.trim();
 }
 
-function buildChangesetXml(candidateId: string) {
+function buildChangesetXml() {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <osm version="0.6" generator="GdzieTaKoperta">
   <changeset>
@@ -111,7 +130,6 @@ function buildChangesetXml(candidateId: string) {
     )}"/>
     <tag k="source" v="survey"/>
     <tag k="hashtags" v="#GdzieTaKoperta"/>
-    <tag k="gtk:candidate_id" v="${xmlEscape(candidateId)}"/>
   </changeset>
 </osm>`;
 }
@@ -195,7 +213,7 @@ export async function POST(
       session!.accessToken,
       {
         method: "PUT",
-        body: buildChangesetXml(candidate.id)
+        body: buildChangesetXml()
       }
     );
 

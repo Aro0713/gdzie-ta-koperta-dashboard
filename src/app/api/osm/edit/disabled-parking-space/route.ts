@@ -45,9 +45,11 @@ function xmlEscape(value: string | number | null | undefined) {
 function formatCoordinate(value: number) {
   return value.toFixed(7);
 }
+
 function formatOsmDate(value = new Date()) {
   return value.toISOString().slice(0, 10);
 }
+
 function hasWriteApi(scope?: string) {
   return Boolean(scope?.split(/\s+/).includes("write_api"));
 }
@@ -103,8 +105,6 @@ function buildNodeXml(changesetId: string, lat: number, lng: number) {
   )}" lon="${xmlEscape(formatCoordinate(lng))}">
     <tag k="amenity" v="parking_space"/>
     <tag k="parking_space" v="disabled"/>
-    <tag k="source" v="survey"/>
-    <tag k="survey:tool" v="GdzieTaKoperta"/>
     <tag k="check_date" v="${xmlEscape(formatOsmDate())}"/>
   </node>
 </osm>`;
