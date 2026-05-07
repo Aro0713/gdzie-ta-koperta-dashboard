@@ -259,10 +259,9 @@ export async function GET(request: NextRequest) {
 
       errors.push(message);
 
-      console.error("[api/osm/gtk-parking] Overpass endpoint failed", {
-        endpoint,
+      console.error("[api/osm/gtk-parking] all Overpass endpoints failed", {
         mode,
-        message
+        errors
       });
     }
   }
