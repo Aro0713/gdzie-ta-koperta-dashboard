@@ -2870,3 +2870,106 @@ textarea {
   font-weight: 900;
   white-space: nowrap;
 }
+/* --- GTK AI candidates: purple markers --- */
+
+.gtk-ai-candidate-marker {
+  display: grid !important;
+  place-items: center !important;
+  width: 48px !important;
+  height: 48px !important;
+  border: 3px solid white !important;
+  border-radius: 999px !important;
+  color: white !important;
+  background: linear-gradient(135deg, #7c3aed, #c026d3) !important;
+  box-shadow:
+    0 14px 34px rgba(124, 58, 237, 0.36),
+    0 0 0 6px rgba(124, 58, 237, 0.1) !important;
+}
+
+.gtk-ai-candidate-marker::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 999px;
+  border: 2px solid rgba(192, 38, 211, 0.28);
+  animation: gtkAiCandidatePulse 1.8s ease-out infinite;
+}
+
+.gtk-ai-candidate-marker .gtk-ai-candidate-icon {
+  position: relative;
+  z-index: 2;
+  display: grid !important;
+  width: 29px !important;
+  height: 29px !important;
+  place-items: center !important;
+  font-size: 1.12rem !important;
+  line-height: 1 !important;
+  font-weight: 1000 !important;
+}
+
+.gtk-ai-candidate-marker .gtk-ai-candidate-label {
+  position: relative;
+  z-index: 2;
+  display: block !important;
+  width: auto !important;
+  height: auto !important;
+  margin-top: -9px !important;
+  padding: 1px 6px !important;
+  border-radius: 999px !important;
+  color: #581c87 !important;
+  background: #ffffff !important;
+  font-size: 0.56rem !important;
+  line-height: 1.1 !important;
+  font-weight: 1000 !important;
+  letter-spacing: 0.04em !important;
+}
+
+@keyframes gtkAiCandidatePulse {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.85;
+  }
+
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+/* --- GTK AI popup --- */
+
+.gtk-ai-popup strong {
+  color: #581c87;
+}
+
+.gtk-ai-popup-button-submit {
+  background: linear-gradient(135deg, #7c3aed, #c026d3);
+}
+
+.gtk-ai-popup-button-reject {
+  background: #7f1d1d;
+}
+
+/* --- GTK AI toolbar chip polish --- */
+
+.map-toolbar-topbar .map-status-pill {
+  white-space: nowrap;
+}
+
+.map-toolbar-topbar .map-status-pill:nth-child(3) {
+  color: #581c87;
+  background: rgba(124, 58, 237, 0.11);
+}
+
+@media (max-width: 760px) {
+  .gtk-ai-candidate-marker {
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  .gtk-ai-candidate-marker .gtk-ai-candidate-icon {
+    width: 26px !important;
+    height: 26px !important;
+    font-size: 1rem !important;
+  }
+}

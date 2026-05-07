@@ -51,6 +51,43 @@ type SendToOsmResponse = {
   details?: unknown;
 };
 
+type AiCandidate = {
+  id: string;
+  status: string;
+  lat: number;
+  lng: number;
+  confidence: number;
+  modelVersion: string;
+  imagerySource?: string | null;
+  thumbnailUrl?: string | null;
+  createdAt: string;
+};
+
+type AiCandidatesResponse = {
+  ok?: boolean;
+  candidates?: AiCandidate[];
+  error?: string;
+  details?: unknown;
+};
+
+type AiCandidateSubmitResponse = {
+  ok?: boolean;
+  id?: string;
+  nodeId?: string;
+  changesetId?: string;
+  osmUrl?: string;
+  error?: string;
+  details?: unknown;
+};
+
+type AiCandidateRejectResponse = {
+  ok?: boolean;
+  id?: string;
+  status?: string;
+  error?: string;
+  details?: unknown;
+};
+
 export type UserAddedSpot = {
   id: string;
   lat: number;
@@ -83,10 +120,12 @@ const MIN_SEARCH_RADIUS_METERS = 100;
 const MAX_SEARCH_RADIUS_METERS = 5000;
 const DEFAULT_SEARCH_RADIUS_METERS = 5000;
 const LOCAL_USER_SPOTS_KEY = "gdzietakoperta.localUserSpots.v1";
+
 const POLAND_BOUNDS: [[number, number], [number, number]] = [
   [49.0, 14.0],
   [55.2, 24.5]
 ];
+
 function normalizeLeaflet(module: LeafletModuleWithMaybeDefault) {
   return (module.default || module) as LeafletWithCluster;
 }
@@ -179,6 +218,18 @@ function formatSubmittedDate(spot: UserAddedSpot) {
 
 function formatUserSpotGps(spot: UserAddedSpot) {
   return `${spot.lat.toFixed(6)}, ${spot.lng.toFixed(6)}`;
+}
+
+function formatCandidateConfidence(confidence: number) {
+  return `${Math.round(confidence * 100)}%`;
+}
+
+function formatCandidateDate(candidate: AiCandidate) {
+  try {
+    return new Date(candidate.createdAt).toLocaleString("pl-PL");
+  } catch {
+    return "brak daty";
+  }
 }
 
 function clampRadius(value: number) {
@@ -328,6 +379,60 @@ function buildUserSpotPopupHtml(
   `;
 }
 
+function buildAiCandidatePopupHtml(
+  candidate: AiCandidate,
+  isOsmAuthenticated: boolean,
+  isHandling: boolean
+) {
+  return `
+    <div class="osm-popup gtk-ai-popup">
+      <strong>Kandydat AI GTK</strong>
+      <span>Wykryty automatycznie na ortofotomapie. Wymaga weryfikacji człowieka przed zapisem do OSM.</span>
+      <dl>
+        <dt>Pewność</dt>
+        <dd>${escapeHtml(formatCandidateConfidence(candidate.confidence))}</dd>
+        <dt>Status</dt>
+        <dd>${escapeHtml(candidate.status)}</dd>
+        <dt>Model</dt>
+        <dd>${escapeHtml(candidate.modelVersion)}</dd>
+        <dt>Źródło</dt>
+        <dd>${escapeHtml(candidate.imagerySource || "brak danych")}</dd>
+        <dt>Dodano</dt>
+        <dd>${escapeHtml(formatCandidateDate(candidate))}</dd>
+        <dt>GPS</dt>
+        <dd>${escapeHtml(`${candidate.lat.toFixed(6)}, ${candidate.lng.toFixed(6)}`)}</dd>
+      </dl>
+
+      <div class="gtk-popup-actions">
+        <button
+          type="button"
+          class="gtk-popup-button gtk-ai-popup-button-submit"
+          data-ai-candidate-action="${isOsmAuthenticated ? "submit-osm" : "login-osm"}"
+          data-ai-candidate-id="${escapeHtml(candidate.id)}"
+          ${isHandling ? "disabled" : ""}
+        >
+          ${isHandling ? "Przetwarzam…" : isOsmAuthenticated ? "Wyślij do OSM" : "Zaloguj OSM"}
+        </button>
+
+        <button
+          type="button"
+          class="gtk-popup-button gtk-ai-popup-button-reject"
+          data-ai-candidate-action="reject"
+          data-ai-candidate-id="${escapeHtml(candidate.id)}"
+          data-ai-reject-reason="not_disabled_parking"
+          ${isHandling ? "disabled" : ""}
+        >
+          Odrzuć
+        </button>
+      </div>
+
+      <span>
+        Odrzucenie zapisze powód w Neon i będzie materiałem treningowym dla modelu AI.
+      </span>
+    </div>
+  `;
+}
+
 export function KopertyMap({
   full = false,
   mode = "near-user",
@@ -335,6 +440,7 @@ export function KopertyMap({
   onUserSpotsChange
 }: KopertyMapProps) {
   const isGtkCountryMode = mode === "gtk-country";
+
   const mapNode = useRef<HTMLDivElement | null>(null);
   const leafletMap = useRef<import("leaflet").Map | null>(null);
   const leafletApi = useRef<LeafletWithCluster | null>(null);
@@ -342,15 +448,16 @@ export function KopertyMap({
   const userCircle = useRef<import("leaflet").Circle | null>(null);
   const osmLayer = useRef<import("leaflet").LayerGroup | null>(null);
   const userAddedLayer = useRef<import("leaflet").LayerGroup | null>(null);
+  const aiCandidatesLayer = useRef<import("leaflet").LayerGroup | null>(null);
   const userSpotsHydrated = useRef(false);
   const pendingUserSpotPopupId = useRef<string | null>(null);
   const userPosition = useRef<{ lat: number; lng: number } | null>(null);
 
- const [locationMessage, setLocationMessage] = useState(
-  isGtkCountryMode
-    ? "Mapa kraju gotowa. Pobieram koperty GTK z OpenStreetMap."
-    : "Mapa gotowa. Pobierz lokalizację, aby zobaczyć koperty w wybranym promieniu."
-);
+  const [locationMessage, setLocationMessage] = useState(
+    isGtkCountryMode
+      ? "Mapa kraju gotowa. Pobieram koperty GTK z OpenStreetMap."
+      : "Mapa gotowa. Pobierz lokalizację, aby zobaczyć koperty w wybranym promieniu."
+  );
   const [osmCount, setOsmCount] = useState(0);
   const [exactOsmCount, setExactOsmCount] = useState(0);
   const [parkingOsmCount, setParkingOsmCount] = useState(0);
@@ -361,7 +468,13 @@ export function KopertyMap({
   const [radiusMeters, setRadiusMeters] = useState(DEFAULT_SEARCH_RADIUS_METERS);
   const [userAddedSpots, setUserAddedSpots] = useState<UserAddedSpot[]>([]);
   const [showRemoveChooser, setShowRemoveChooser] = useState(false);
-  const [osmUser, setOsmUser] = useState<NonNullable<OsmMeResponse["user"]> | null>(null);
+  const [osmUser, setOsmUser] =
+    useState<NonNullable<OsmMeResponse["user"]> | null>(null);
+  const [aiCandidates, setAiCandidates] = useState<AiCandidate[]>([]);
+  const [loadingAiCandidates, setLoadingAiCandidates] = useState(false);
+  const [handlingAiCandidateId, setHandlingAiCandidateId] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -464,14 +577,16 @@ export function KopertyMap({
       setUserAddedSpots(localSpots);
       drawUserAddedSpots(localSpots, L, map);
 
-      window.setTimeout(() => {
-      if (mode === "gtk-country") {
-        void loadGtkCountryOsm();
-        return;
-      }
+      void loadAiCandidates();
 
-      locateUserAndLoadOsm();
-    }, 400);
+      window.setTimeout(() => {
+        if (mode === "gtk-country") {
+          void loadGtkCountryOsm();
+          return;
+        }
+
+        locateUserAndLoadOsm();
+      }, 400);
     }
 
     void loadMap();
@@ -535,6 +650,46 @@ export function KopertyMap({
   useEffect(() => {
     const handlePopupAction = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
+
+      const aiButton = target?.closest<HTMLButtonElement>(
+        "[data-ai-candidate-action]"
+      );
+
+      if (aiButton) {
+        event.preventDefault();
+
+        const action = aiButton.dataset.aiCandidateAction;
+        const candidateId = aiButton.dataset.aiCandidateId;
+
+        if (!candidateId) {
+          return;
+        }
+
+        if (action === "login-osm") {
+          window.location.href = "/api/osm/auth/login";
+        }
+
+        if (action === "submit-osm") {
+          void submitAiCandidateToOsm(candidateId);
+        }
+
+        if (action === "reject") {
+          const reason = aiButton.dataset.aiRejectReason || "other";
+          const note = window.prompt(
+            "Dlaczego ten kandydat nie kwalifikuje się jako koperta?",
+            ""
+          );
+
+          if (note === null) {
+            return;
+          }
+
+          void rejectAiCandidate(candidateId, reason, note);
+        }
+
+        return;
+      }
+
       const button = target?.closest<HTMLButtonElement>(
         "[data-gtk-spot-action]"
       );
@@ -591,12 +746,16 @@ export function KopertyMap({
   }, [userAddedSpots, onUserSpotsChange]);
 
   useEffect(() => {
-  if (!userSpotsHydrated.current) {
-    return;
-  }
+    if (!userSpotsHydrated.current) {
+      return;
+    }
 
-  drawUserAddedSpots(userAddedSpots);
-}, [osmUser, sendingSpotId, showRemoveChooser, userAddedSpots]);
+    drawUserAddedSpots(userAddedSpots);
+  }, [osmUser, sendingSpotId, showRemoveChooser, userAddedSpots]);
+
+  useEffect(() => {
+    drawAiCandidates(aiCandidates);
+  }, [aiCandidates, osmUser, handlingAiCandidateId]);
 
   useEffect(() => {
     if (userAddedSpots.length === 0 && showRemoveChooser) {
@@ -612,6 +771,25 @@ export function KopertyMap({
       osmLayer.current = null;
     }
   }
+
+  function clearUserAddedLayer(forcedMap?: import("leaflet").Map) {
+    const map = forcedMap || leafletMap.current;
+
+    if (map && userAddedLayer.current) {
+      map.removeLayer(userAddedLayer.current);
+      userAddedLayer.current = null;
+    }
+  }
+
+  function clearAiCandidatesLayer(forcedMap?: import("leaflet").Map) {
+    const map = forcedMap || leafletMap.current;
+
+    if (map && aiCandidatesLayer.current) {
+      map.removeLayer(aiCandidatesLayer.current);
+      aiCandidatesLayer.current = null;
+    }
+  }
+
   function keepUserLocationVisible() {
     if (userMarker.current) {
       userMarker.current.setZIndexOffset(1000);
@@ -619,14 +797,6 @@ export function KopertyMap({
 
     if (userCircle.current) {
       userCircle.current.bringToFront();
-    }
-  }
-    function clearUserAddedLayer(forcedMap?: import("leaflet").Map) {
-    const map = forcedMap || leafletMap.current;
-
-    if (map && userAddedLayer.current) {
-      map.removeLayer(userAddedLayer.current);
-      userAddedLayer.current = null;
     }
   }
 
@@ -659,24 +829,48 @@ export function KopertyMap({
     );
   }
 
-function makeUserAddedMarker(L: LeafletWithCluster, spot: UserAddedSpot) {
-  const icon = L.divIcon({
-    className: `user-added-marker gtk-local-marker ${
-      spot.status === "osm_submitted" ? "gtk-local-marker-submitted" : ""
-    } ${showRemoveChooser ? "gtk-local-marker-delete-mode" : ""}`,
-    html: `
-      <span class="gtk-marker-icon">♿</span>
-      <small class="gtk-marker-label">GTK</small>
-    `,
-    iconSize: [46, 46],
-    iconAnchor: [23, 23],
-    popupAnchor: [0, -18]
-  });
+  function makeUserAddedMarker(L: LeafletWithCluster, spot: UserAddedSpot) {
+    const icon = L.divIcon({
+      className: `user-added-marker gtk-local-marker ${
+        spot.status === "osm_submitted" ? "gtk-local-marker-submitted" : ""
+      } ${showRemoveChooser ? "gtk-local-marker-delete-mode" : ""}`,
+      html: `
+        <span class="gtk-marker-icon">♿</span>
+        <small class="gtk-marker-label">GTK</small>
+      `,
+      iconSize: [46, 46],
+      iconAnchor: [23, 23],
+      popupAnchor: [0, -18]
+    });
 
-  return L.marker([spot.lat, spot.lng], { icon }).bindPopup(
-    buildUserSpotPopupHtml(spot, Boolean(osmUser), sendingSpotId === spot.id)
-  );
-}
+    return L.marker([spot.lat, spot.lng], { icon }).bindPopup(
+      buildUserSpotPopupHtml(spot, Boolean(osmUser), sendingSpotId === spot.id)
+    );
+  }
+
+  function makeAiCandidateMarker(
+    L: LeafletWithCluster,
+    candidate: AiCandidate
+  ) {
+    const icon = L.divIcon({
+      className: "gtk-ai-candidate-marker",
+      html: `
+        <span class="gtk-ai-candidate-icon">♿</span>
+        <small class="gtk-ai-candidate-label">GTK</small>
+      `,
+      iconSize: [48, 48],
+      iconAnchor: [24, 24],
+      popupAnchor: [0, -18]
+    });
+
+    return L.marker([candidate.lat, candidate.lng], { icon }).bindPopup(
+      buildAiCandidatePopupHtml(
+        candidate,
+        Boolean(osmUser),
+        handlingAiCandidateId === candidate.id
+      )
+    );
+  }
 
   function createOsmLayer(L: LeafletWithCluster) {
     if (typeof L.markerClusterGroup === "function") {
@@ -714,20 +908,20 @@ function makeUserAddedMarker(L: LeafletWithCluster, spot: UserAddedSpot) {
     let markerToOpen: import("leaflet").Marker | null = null;
 
     spots.forEach((spot) => {
-    const marker = makeUserAddedMarker(L, spot);
+      const marker = makeUserAddedMarker(L, spot);
 
-    if (showRemoveChooser) {
-      marker.on("click", () => {
-        removeUserSpotById(spot.id);
-      });
-    }
+      if (showRemoveChooser) {
+        marker.on("click", () => {
+          removeUserSpotById(spot.id);
+        });
+      }
 
-    layer.addLayer(marker);
+      layer.addLayer(marker);
 
-    if (!showRemoveChooser && pendingUserSpotPopupId.current === spot.id) {
-    markerToOpen = marker;
-  }
-  });
+      if (!showRemoveChooser && pendingUserSpotPopupId.current === spot.id) {
+        markerToOpen = marker;
+      }
+    });
 
     layer.addTo(map);
     userAddedLayer.current = layer;
@@ -739,6 +933,36 @@ function makeUserAddedMarker(L: LeafletWithCluster, spot: UserAddedSpot) {
         pendingUserSpotPopupId.current = null;
       }, 80);
     }
+  }
+
+  function drawAiCandidates(
+    candidates: AiCandidate[],
+    forcedL?: LeafletWithCluster,
+    forcedMap?: import("leaflet").Map
+  ) {
+    const L = forcedL || leafletApi.current;
+    const map = forcedMap || leafletMap.current;
+
+    if (!L || !map) {
+      return;
+    }
+
+    clearAiCandidatesLayer(map);
+
+    if (!candidates.length) {
+      aiCandidatesLayer.current = null;
+      return;
+    }
+
+    const layer = L.layerGroup();
+
+    candidates.forEach((candidate) => {
+      layer.addLayer(makeAiCandidateMarker(L, candidate));
+    });
+
+    layer.addTo(map);
+    aiCandidatesLayer.current = layer;
+    keepUserLocationVisible();
   }
 
   function drawOsmFeatures(data: OsmParkingResponse) {
@@ -801,93 +1025,129 @@ function makeUserAddedMarker(L: LeafletWithCluster, spot: UserAddedSpot) {
       );
     }
   }
+
   function drawGtkCountryFeatures(data: OsmParkingResponse) {
-  const L = leafletApi.current;
-  const map = leafletMap.current;
+    const L = leafletApi.current;
+    const map = leafletMap.current;
 
-  if (!L || !map) {
-    return;
-  }
-
-  clearOsmLayer();
-
-  const features = data.features || [];
-  const count = data.metadata?.count ?? features.length;
-
-  const exactCount = features.filter(
-    (feature) => feature.properties?.objectType === "disabled_parking_space"
-  ).length;
-
-  setOsmCount(count);
-  setExactOsmCount(exactCount || count);
-  setParkingOsmCount(0);
-
-  map.fitBounds(POLAND_BOUNDS, {
-    padding: [26, 26]
-  });
-
-  if (!features.length) {
-    setLocationMessage(
-      "Nie znaleziono kopert GTK w OpenStreetMap. Świeże edycje mogą pojawić się po krótkiej synchronizacji Overpass."
-    );
-    return;
-  }
-
-  const layerGroup = createOsmLayer(L);
-
-  features.forEach((feature) => {
-    layerGroup.addLayer(makeOsmMarker(L, feature));
-  });
-
-  layerGroup.addTo(map);
-  osmLayer.current = layerGroup;
-
-  setLocationMessage(
-    `Pokazuję ${count} kopert GTK dodanych przez użytkowników w OpenStreetMap w całej Polsce.`
-  );
-}
-
-async function loadGtkCountryOsm() {
-  setLoadingOsm(true);
-  setLocationMessage("Pobieram koperty GTK z OpenStreetMap dla całej Polski…");
-
-  try {
-    const response = await fetch("/api/osm/gtk-parking", {
-      cache: "no-store"
-    });
-
-    const data = (await response.json()) as Partial<OsmParkingResponse>;
-
-    if (!response.ok || data.error) {
-      throw new Error(data.error || "Nie udało się pobrać kopert GTK z OSM.");
+    if (!L || !map) {
+      return;
     }
 
-    const gtkData = data as OsmParkingResponse;
+    clearOsmLayer();
 
-    drawGtkCountryFeatures(gtkData);
-    onOsmData?.(gtkData);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Nieznany błąd pobierania GTK.";
+    const features = data.features || [];
+    const count = data.metadata?.count ?? features.length;
 
-    setLocationMessage(`Błąd GTK/OSM: ${message}`);
-    setOsmCount(0);
-    setExactOsmCount(0);
+    const exactCount = features.filter(
+      (feature) => feature.properties?.objectType === "disabled_parking_space"
+    ).length;
+
+    setOsmCount(count);
+    setExactOsmCount(exactCount || count);
     setParkingOsmCount(0);
 
-    const emptyData: OsmParkingResponse = {
-      type: "FeatureCollection",
-      features: [],
-      metadata: {
-        count: 0
-      }
-    };
+    map.fitBounds(POLAND_BOUNDS, {
+      padding: [26, 26]
+    });
 
-    onOsmData?.(emptyData);
-  } finally {
-    setLoadingOsm(false);
+    if (!features.length) {
+      setLocationMessage(
+        "Nie znaleziono kopert GTK w OpenStreetMap. Świeże edycje mogą pojawić się po krótkiej synchronizacji Overpass."
+      );
+      return;
+    }
+
+    const layerGroup = createOsmLayer(L);
+
+    features.forEach((feature) => {
+      layerGroup.addLayer(makeOsmMarker(L, feature));
+    });
+
+    layerGroup.addTo(map);
+    osmLayer.current = layerGroup;
+
+    setLocationMessage(
+      `Pokazuję ${count} kopert GTK dodanych przez użytkowników w OpenStreetMap w całej Polsce.`
+    );
   }
-}
+
+  async function loadAiCandidates() {
+    setLoadingAiCandidates(true);
+
+    try {
+      const response = await fetch("/api/ai-candidates", {
+        cache: "no-store"
+      });
+
+      const data = (await response.json()) as AiCandidatesResponse;
+
+      if (!response.ok || data.error || !data.ok) {
+        throw new Error(data.error || "Nie udało się pobrać kandydatów AI.");
+      }
+
+      const candidates = data.candidates || [];
+
+      setAiCandidates(candidates);
+      drawAiCandidates(candidates);
+
+      if (candidates.length > 0) {
+        setLocationMessage((current) => {
+          if (current.includes("Kandydaci AI")) {
+            return current;
+          }
+
+          return `${current} Kandydaci AI GTK: ${candidates.length}.`;
+        });
+      }
+    } catch {
+      setAiCandidates([]);
+    } finally {
+      setLoadingAiCandidates(false);
+    }
+  }
+
+  async function loadGtkCountryOsm() {
+    setLoadingOsm(true);
+    setLocationMessage("Pobieram koperty GTK z OpenStreetMap dla całej Polski…");
+
+    try {
+      const response = await fetch("/api/osm/gtk-parking", {
+        cache: "no-store"
+      });
+
+      const data = (await response.json()) as Partial<OsmParkingResponse>;
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Nie udało się pobrać kopert GTK z OSM.");
+      }
+
+      const gtkData = data as OsmParkingResponse;
+
+      drawGtkCountryFeatures(gtkData);
+      onOsmData?.(gtkData);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Nieznany błąd pobierania GTK.";
+
+      setLocationMessage(`Błąd GTK/OSM: ${message}`);
+      setOsmCount(0);
+      setExactOsmCount(0);
+      setParkingOsmCount(0);
+
+      const emptyData: OsmParkingResponse = {
+        type: "FeatureCollection",
+        features: [],
+        metadata: {
+          count: 0
+        }
+      };
+
+      onOsmData?.(emptyData);
+    } finally {
+      setLoadingOsm(false);
+    }
+  }
 
   async function fetchOsmParking(
     lat: number,
@@ -940,6 +1200,108 @@ async function loadGtkCountryOsm() {
       });
     } finally {
       setLoadingOsm(false);
+    }
+  }
+
+  async function submitAiCandidateToOsm(candidateId: string) {
+    const candidate = aiCandidates.find((item) => item.id === candidateId);
+
+    if (!candidate) {
+      setLocationMessage("Nie znaleziono kandydata AI.");
+      return;
+    }
+
+    if (!osmUser) {
+      window.location.href = "/api/osm/auth/login";
+      return;
+    }
+
+    setHandlingAiCandidateId(candidateId);
+    setLocationMessage("Wysyłam kandydata AI do OpenStreetMap…");
+
+    try {
+      const response = await fetch(
+        `/api/ai-candidates/${encodeURIComponent(candidateId)}/submit-osm`,
+        {
+          method: "POST"
+        }
+      );
+
+      const data = (await response.json()) as AiCandidateSubmitResponse;
+
+      if (!response.ok || !data.ok || !data.nodeId || !data.osmUrl) {
+        throw new Error(data.error || "Nie udało się wysłać kandydata AI do OSM.");
+      }
+
+      setAiCandidates((current) =>
+        current.filter((item) => item.id !== candidateId)
+      );
+
+      setLocationMessage(
+        `Kandydat AI został wysłany do OpenStreetMap jako node ${data.nodeId}.`
+      );
+
+      await loadAiCandidates();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Nieznany błąd wysyłki AI.";
+
+      setLocationMessage(`Błąd wysyłki AI do OSM: ${message}`);
+    } finally {
+      setHandlingAiCandidateId(null);
+    }
+  }
+
+  async function rejectAiCandidate(
+    candidateId: string,
+    reason: string,
+    note: string
+  ) {
+    if (!osmUser) {
+      window.location.href = "/api/osm/auth/login";
+      return;
+    }
+
+    setHandlingAiCandidateId(candidateId);
+    setLocationMessage("Odrzucam kandydata AI i zapisuję adnotację…");
+
+    try {
+      const response = await fetch(
+        `/api/ai-candidates/${encodeURIComponent(candidateId)}/reject`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            reason,
+            note
+          })
+        }
+      );
+
+      const data = (await response.json()) as AiCandidateRejectResponse;
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Nie udało się odrzucić kandydata AI.");
+      }
+
+      setAiCandidates((current) =>
+        current.filter((item) => item.id !== candidateId)
+      );
+
+      setLocationMessage(
+        "Kandydat AI został odrzucony. Powód zapisano jako dane treningowe."
+      );
+
+      await loadAiCandidates();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Nieznany błąd odrzucenia AI.";
+
+      setLocationMessage(`Błąd odrzucenia kandydata AI: ${message}`);
+    } finally {
+      setHandlingAiCandidateId(null);
     }
   }
 
@@ -1117,46 +1479,46 @@ async function loadGtkCountryOsm() {
     }
   }
 
-function removeUserSpotById(spotId: string) {
-  const removedSpot = userAddedSpots.find((spot) => spot.id === spotId);
-  const next = userAddedSpots.filter((spot) => spot.id !== spotId);
+  function removeUserSpotById(spotId: string) {
+    const removedSpot = userAddedSpots.find((spot) => spot.id === spotId);
+    const next = userAddedSpots.filter((spot) => spot.id !== spotId);
 
-  setUserAddedSpots(next);
-  setEditingSpotId(null);
-  setShowRemoveChooser(next.length > 0);
+    setUserAddedSpots(next);
+    setEditingSpotId(null);
+    setShowRemoveChooser(next.length > 0);
 
-  if (removedSpot) {
-    setLocationMessage(
-      `Usunięto kopertę ${removedSpot.lat.toFixed(5)}, ${removedSpot.lng.toFixed(
-        5
-      )}.`
-    );
-  } else {
-    setLocationMessage("Usunięto kopertę.");
+    if (removedSpot) {
+      setLocationMessage(
+        `Usunięto kopertę ${removedSpot.lat.toFixed(5)}, ${removedSpot.lng.toFixed(
+          5
+        )}.`
+      );
+    } else {
+      setLocationMessage("Usunięto kopertę.");
+    }
+
+    if (next.length === 0) {
+      setShowRemoveChooser(false);
+      setLocationMessage("Usunięto ostatnią lokalną kopertę.");
+    }
   }
 
-  if (next.length === 0) {
-    setShowRemoveChooser(false);
-    setLocationMessage("Usunięto ostatnią lokalną kopertę.");
+  function toggleRemoveChooser() {
+    setAddingMode(false);
+    setEditingSpotId(null);
+
+    setShowRemoveChooser((current) => {
+      const next = !current;
+
+      setLocationMessage(
+        next
+          ? "Kliknij kopertę, którą chcesz usunąć."
+          : "Tryb usuwania został wyłączony."
+      );
+
+      return next;
+    });
   }
-}
-
- function toggleRemoveChooser() {
-  setAddingMode(false);
-  setEditingSpotId(null);
-
-  setShowRemoveChooser((current) => {
-    const next = !current;
-
-    setLocationMessage(
-      next
-        ? "Kliknij kopertę, którą chcesz usunąć."
-        : "Tryb usuwania został wyłączony."
-    );
-
-    return next;
-  });
-}
 
   function enableAddingMode() {
     setShowRemoveChooser(false);
@@ -1207,11 +1569,11 @@ function removeUserSpotById(spotId: string) {
           });
 
           userMarker.current = L.marker([lat, lng], {
-          icon: userIcon,
-          zIndexOffset: 1000
-        })
-          .addTo(map)
-          .bindPopup("Twoja lokalizacja");
+            icon: userIcon,
+            zIndexOffset: 1000
+          })
+            .addTo(map)
+            .bindPopup("Twoja lokalizacja");
         }
 
         if (userCircle.current) {
@@ -1225,7 +1587,8 @@ function removeUserSpotById(spotId: string) {
             opacity: 0.75,
             fillColor: "#1477d4",
             fillOpacity: 0.06,
-            dashArray: "8 8"
+            dashArray: "8 8",
+            interactive: false
           }).addTo(map);
         }
 
@@ -1258,7 +1621,8 @@ function removeUserSpotById(spotId: string) {
         }`}
         aria-label="Mapa kopert"
       />
-            <div
+
+      <div
         className="map-toolbar map-toolbar-compact map-toolbar-topbar"
         aria-live="polite"
       >
@@ -1269,20 +1633,22 @@ function removeUserSpotById(spotId: string) {
               onClick={() => {
                 if (isGtkCountryMode) {
                   void loadGtkCountryOsm();
+                  void loadAiCandidates();
                   return;
                 }
 
                 locateUserAndLoadOsm(radiusMeters);
+                void loadAiCandidates();
               }}
               type="button"
-              disabled={loadingOsm}
+              disabled={loadingOsm || loadingAiCandidates}
               title={
                 isGtkCountryMode
-                  ? "Odśwież koperty GTK z OpenStreetMap"
+                  ? "Odśwież koperty GTK i kandydatów AI"
                   : "Pobierz lokalizację"
               }
             >
-              {loadingOsm
+              {loadingOsm || loadingAiCandidates
                 ? "Pobieram…"
                 : isGtkCountryMode
                   ? "Odśwież"
@@ -1359,6 +1725,7 @@ function removeUserSpotById(spotId: string) {
               {isGtkCountryMode ? (
                 <>
                   <span className="map-status-pill">♿ GTK: {exactOsmCount}</span>
+                  <span className="map-status-pill">AI GTK: {aiCandidates.length}</span>
                   <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
                   <span className="map-status-pill">Razem: {osmCount}</span>
                 </>
@@ -1366,6 +1733,7 @@ function removeUserSpotById(spotId: string) {
                 <>
                   <span className="map-status-pill">♿ OSM: {exactOsmCount}</span>
                   <span className="map-status-pill">P: {parkingOsmCount}</span>
+                  <span className="map-status-pill">AI GTK: {aiCandidates.length}</span>
                   <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
                   <span className="map-status-pill">Razem: {osmCount}</span>
                 </>
