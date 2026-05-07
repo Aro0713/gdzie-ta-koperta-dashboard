@@ -1,0 +1,42 @@
+name: GTK AI crawler
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 2 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  crawl-and-import:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pillow opencv-python-headless numpy pyproj
+
+      - name: Run crawler
+        run: |
+          python scripts/ai-crawler/gtk_candidate_crawler.py \
+            --bbox "19.1158,50.3164,19.1180,50.3174" \
+            --size 1800
+
+      - name: Import candidates to GTK API
+        env:
+          AI_CANDIDATES_IMPORT_SECRET: ${{ secrets.AI_CANDIDATES_IMPORT_SECRET }}
+        run: |
+          curl -sS -X POST "https://www.gdzietakoperta.pl/api/ai-candidates/import" \
+            -H "Authorization: Bearer $AI_CANDIDATES_IMPORT_SECRET" \
+            -H "Content-Type: application/json" \
+            --data-binary "@data/ai-crawler/gtk_ai_candidates_import.json"
