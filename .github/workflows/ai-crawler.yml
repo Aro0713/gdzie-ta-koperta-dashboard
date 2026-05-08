@@ -26,17 +26,100 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pillow opencv-python-headless numpy pyproj
 
-      - name: Run crawler
-        run: |
-          python scripts/ai-crawler/gtk_candidate_crawler.py \
-            --bbox "19.1158,50.3164,19.1180,50.3174" \
-            --size 1800
-
-      - name: Import candidates to GTK API
+      - name: Lease tiles, crawl, import, complete
         env:
           AI_CANDIDATES_IMPORT_SECRET: ${{ secrets.AI_CANDIDATES_IMPORT_SECRET }}
+          GTK_API_BASE_URL: https://www.gdzietakoperta.pl
         run: |
-          curl -sS -X POST "https://www.gdzietakoperta.pl/api/ai-candidates/import" \
-            -H "Authorization: Bearer $AI_CANDIDATES_IMPORT_SECRET" \
-            -H "Content-Type: application/json" \
-            --data-binary "@data/ai-crawler/gtk_ai_candidates_import.json"
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          import requests
+
+          secret = os.environ["AI_CANDIDATES_IMPORT_SECRET"]
+          base_url = os.environ["GTK_API_BASE_URL"].rstrip("/")
+          worker_id = f"github-actions-{os.environ.get('GITHUB_RUN_ID', 'manual')}"
+
+          headers = {
+              "Authorization": f"Bearer {secret}",
+              "Content-Type": "application/json",
+          }
+
+          lease_response = requests.post(
+              f"{base_url}/api/ai-candidates/scan-tiles/lease",
+              headers=headers,
+              json={"limit": 4, "workerId": worker_id},
+              timeout=60,
+          )
+          lease_response.raise_for_status()
+
+          lease_data = lease_response.json()
+          tiles = lease_data.get("tiles", [])
+
+          print(json.dumps(lease_data, ensure_ascii=False, indent=2))
+
+          if not tiles:
+              print("No tiles to scan.")
+              sys.exit(0)
+
+          for tile in tiles:
+              tile_id = tile["id"]
+              bbox = f'{tile["west"]},{tile["south"]},{tile["east"]},{tile["north"]}'
+              print(f"Scanning tile {tile['tileKey']} bbox={bbox}")
+
+              candidates_count = 0
+              error = None
+
+              try:
+                  subprocess.run(
+                      [
+                          sys.executable,
+                          "scripts/ai-crawler/gtk_candidate_crawler.py",
+                          "--bbox",
+                          bbox,
+                          "--size",
+                          "1800",
+                      ],
+                      check=True,
+                  )
+
+                  with open("data/ai-crawler/gtk_ai_candidates_preview.json", "r", encoding="utf-8") as file:
+                      preview = json.load(file)
+
+                  candidates_count = int(preview.get("count", 0))
+
+                  with open("data/ai-crawler/gtk_ai_candidates_import.json", "r", encoding="utf-8") as file:
+                      import_payload = json.load(file)
+
+                  import_response = requests.post(
+                      f"{base_url}/api/ai-candidates/import",
+                      headers=headers,
+                      json=import_payload,
+                      timeout=120,
+                  )
+                  import_response.raise_for_status()
+
+                  print("Import result:")
+                  print(json.dumps(import_response.json(), ensure_ascii=False, indent=2))
+
+              except Exception as exc:
+                  error = str(exc)[:1000]
+                  print(f"Tile failed: {error}")
+
+              complete_response = requests.post(
+                  f"{base_url}/api/ai-candidates/scan-tiles/complete",
+                  headers=headers,
+                  json={
+                      "tileId": tile_id,
+                      "candidatesCount": candidates_count,
+                      "error": error,
+                  },
+                  timeout=60,
+              )
+              complete_response.raise_for_status()
+
+              print("Complete result:")
+              print(json.dumps(complete_response.json(), ensure_ascii=False, indent=2))
+          PY
