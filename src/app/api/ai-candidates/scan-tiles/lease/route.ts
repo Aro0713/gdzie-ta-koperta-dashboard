@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db";
+import { isAuthorizedImportRequest } from "@/lib/importSecretAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,15 +21,11 @@ function jsonError(message: string, status = 400) {
 }
 
 export async function POST(request: NextRequest) {
-  const secret = process.env.AI_CANDIDATES_IMPORT_SECRET;
-
-  if (!secret) {
+  if (!process.env.AI_CANDIDATES_IMPORT_SECRET) {
     return jsonError("Missing AI_CANDIDATES_IMPORT_SECRET", 500);
   }
 
-  const auth = request.headers.get("authorization");
-
-  if (auth !== `Bearer ${secret}`) {
+  if (!isAuthorizedImportRequest(request)) {
     return jsonError("Unauthorized", 401);
   }
 
