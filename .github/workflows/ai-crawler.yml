@@ -58,6 +58,7 @@ jobs:
           lease_data = lease_response.json()
           tiles = lease_data.get("tiles", [])
 
+          print("Lease result:")
           print(json.dumps(lease_data, ensure_ascii=False, indent=2))
 
           if not tiles:
@@ -66,8 +67,10 @@ jobs:
 
           for tile in tiles:
               tile_id = tile["id"]
+              tile_key = tile["tileKey"]
               bbox = f'{tile["west"]},{tile["south"]},{tile["east"]},{tile["north"]}'
-              print(f"Scanning tile {tile['tileKey']} bbox={bbox}")
+
+              print(f"Scanning tile {tile_key} bbox={bbox}")
 
               candidates_count = 0
               error = None
@@ -85,13 +88,23 @@ jobs:
                       check=True,
                   )
 
-                  with open("data/ai-crawler/gtk_ai_candidates_preview.json", "r", encoding="utf-8") as file:
+                  with open(
+                      "data/ai-crawler/gtk_ai_candidates_preview.json",
+                      "r",
+                      encoding="utf-8",
+                  ) as file:
                       preview = json.load(file)
 
                   candidates_count = int(preview.get("count", 0))
 
-                                   if candidates_count > 0:
-                      with open("data/ai-crawler/gtk_ai_candidates_import.json", "r", encoding="utf-8") as file:
+                  print(f"Detected candidates: {candidates_count}")
+
+                  if candidates_count > 0:
+                      with open(
+                          "data/ai-crawler/gtk_ai_candidates_import.json",
+                          "r",
+                          encoding="utf-8",
+                      ) as file:
                           import_payload = json.load(file)
 
                       import_response = requests.post(
