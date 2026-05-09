@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-05-08T05:24:44.622994+00:00",
+  "generatedAt": "2026-05-09T05:40:04.367873+00:00",
   "country": "Poland",
   "strategy": "voivodeship-snapshot-public-access-deduped",
-  "count": 25744,
-  "exactDisabledParkingSpaces": 17009,
+  "count": 25749,
+  "exactDisabledParkingSpaces": 17014,
   "parkingsWithDisabledCapacity": 8735,
   "files": {
     "geojson": "public/data/disabled-parking.geojson",
