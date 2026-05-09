@@ -1,4 +1,5 @@
 import argparse
+import base64
 import json
 from collections import Counter
 from pathlib import Path
@@ -15,7 +16,7 @@ WMS_URL = "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResoluti
 OUT_DIR = Path("data/ai-crawler")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-MODEL_VERSION = "blue-envelope-detector-mvp-v3-white-rectangle-cross"
+MODEL_VERSION = "blue-envelope-detector-mvp-v4-preview-place-assessment"
 IMAGERY_SOURCE = "geoportal-orto-wms-high-resolution"
 
 WGS84_TO_3857 = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
@@ -108,6 +109,32 @@ def pixel_to_wgs84(
     lng, lat = mercator_to_wgs84(mercator_x, mercator_y)
 
     return lat, lng
+
+
+def pixel_bbox_to_wgs84_bbox(
+    field_box: np.ndarray,
+    width: int,
+    height: int,
+    mercator_bbox: tuple[float, float, float, float],
+) -> dict[str, float]:
+    x, y, w, h = cv2.boundingRect(field_box)
+
+    corners = [
+        pixel_to_wgs84(x, y, width, height, mercator_bbox),
+        pixel_to_wgs84(x + w, y, width, height, mercator_bbox),
+        pixel_to_wgs84(x, y + h, width, height, mercator_bbox),
+        pixel_to_wgs84(x + w, y + h, width, height, mercator_bbox),
+    ]
+
+    lats = [corner[0] for corner in corners]
+    lngs = [corner[1] for corner in corners]
+
+    return {
+        "west": round(min(lngs), 7),
+        "south": round(min(lats), 7),
+        "east": round(max(lngs), 7),
+        "north": round(max(lats), 7),
+    }
 
 
 def clamp01(value: float) -> float:
@@ -232,6 +259,51 @@ def warp_patch(
         flags=interpolation,
         borderMode=cv2.BORDER_REPLICATE,
     )
+
+
+def make_candidate_thumbnail_data_url(
+    image: np.ndarray,
+    field_box: np.ndarray,
+    size: int = 300,
+) -> str | None:
+    x, y, w, h = cv2.boundingRect(field_box)
+
+    if w <= 0 or h <= 0:
+        return None
+
+    image_h, image_w = image.shape[:2]
+
+    center_x = x + w // 2
+    center_y = y + h // 2
+    side = int(max(w, h) * 4.0)
+
+    x1 = max(0, center_x - side // 2)
+    y1 = max(0, center_y - side // 2)
+    x2 = min(image_w, center_x + side // 2)
+    y2 = min(image_h, center_y + side // 2)
+
+    annotated = image.copy()
+    cv2.polylines(annotated, [field_box], True, (0, 220, 0), 3)
+
+    crop = annotated[y1:y2, x1:x2]
+
+    if crop.size == 0:
+        return None
+
+    preview = cv2.resize(crop, (size, size), interpolation=cv2.INTER_AREA)
+
+    ok, encoded = cv2.imencode(
+        ".jpg",
+        preview,
+        [int(cv2.IMWRITE_JPEG_QUALITY), 78],
+    )
+
+    if not ok:
+        return None
+
+    payload = base64.b64encode(encoded.tobytes()).decode("ascii")
+
+    return f"data:image/jpeg;base64,{payload}"
 
 
 def build_context_masks(image: np.ndarray) -> dict[str, np.ndarray]:
@@ -546,6 +618,130 @@ def diagonal_band_cross_score(
     return cross_score, diag_1_score, diag_2_score
 
 
+def describe_rejection_reason(reason: str) -> str:
+    labels = {
+        "too_small": "obiekt jest za mały",
+        "too_large": "obiekt jest za duży",
+        "blue_area_too_small": "niebieska powierzchnia jest za mała",
+        "blue_area_too_large": "niebieska powierzchnia jest za duża",
+        "bad_aspect_ratio": "kształt nie pasuje do koperty parkingowej",
+        "blue_fill_too_low": "za mało zwartego niebieskiego pola",
+        "not_paved_context": "brak wystarczającego kontekstu asfaltu/kostki",
+        "vegetation_context": "obiekt leży głównie przy zieleni",
+        "roof_like_context": "obiekt wygląda jak dach albo element budynku",
+        "no_white_marking_inside_blue_field": "brak białego oznakowania w niebieskim polu",
+        "no_strong_white_marking_inside_blue_field": "brak wyraźnych białych linii w niebieskim polu",
+        "no_white_rectangle_outline": "brak białego obrysu prostokąta",
+        "no_crossed_white_lines": "brak skrzyżowanych białych linii / symbolu",
+        "vehicle_like": "obiekt wygląda jak pojazd",
+        "motorcycle_or_small_object_like": "obiekt wygląda jak motocykl albo mały przedmiot",
+        "low_confidence": "za niska pewność klasyfikacji",
+        "below_min_confidence": "poniżej minimalnego progu pewności",
+        "accepted": "spełnia warunki kandydata na kopertę",
+    }
+
+    return labels.get(reason, reason)
+
+
+def infer_place_type(evidence: dict[str, Any]) -> str:
+    paved = float(evidence.get("pavedContextRatio", 0))
+    green = float(evidence.get("greenContextRatio", 0))
+    roof = float(evidence.get("redRoofContextRatio", 0))
+    blue_area_m2 = float(evidence.get("blueAreaM2", 0))
+
+    if roof > 0.24 and paved < 0.45:
+        return "dach / okolica budynku"
+
+    if green > 0.55:
+        return "zieleń / pobocze / teren nieparkingowy"
+
+    if blue_area_m2 < 3:
+        return "mały niebieski obiekt przy parkingu"
+
+    if paved >= 0.48:
+        return "utwardzony parking lub plac manewrowy"
+
+    if paved >= 0.22:
+        return "prawdopodobnie utwardzony teren przy parkingu"
+
+    return "niejednoznaczne miejsce"
+
+
+def build_candidate_assessment(
+    accepted: bool,
+    confidence: float,
+    reason: str,
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    place_type = infer_place_type(evidence)
+
+    positive_signals: list[str] = []
+    negative_signals: list[str] = []
+
+    if float(evidence.get("blueFillRatio", 0)) >= 0.18:
+        positive_signals.append("wykryto zwarte niebieskie pole")
+    else:
+        negative_signals.append("niebieskie pole nie jest wystarczająco zwarte")
+
+    if float(evidence.get("whiteInsideRatio", 0)) >= 0.02:
+        positive_signals.append("wykryto białe oznakowanie wewnątrz pola")
+    else:
+        negative_signals.append("brak białego oznakowania wewnątrz pola")
+
+    if float(evidence.get("whiteRectangleOutlineScore", 0)) >= 0.14:
+        positive_signals.append("wykryto fragmenty białego obrysu prostokąta")
+    else:
+        negative_signals.append("brak białego obrysu prostokąta")
+
+    if float(evidence.get("whiteCrossScore", 0)) >= 0.30:
+        positive_signals.append("wykryto skrzyżowane białe linie / symbol")
+    else:
+        negative_signals.append("brak skrzyżowanych białych linii / symbolu")
+
+    if float(evidence.get("pavedContextRatio", 0)) >= 0.22:
+        positive_signals.append("otoczenie wygląda na asfalt/kostkę/parking")
+    else:
+        negative_signals.append("otoczenie nie wygląda jak utwardzony parking")
+
+    if float(evidence.get("greenContextRatio", 0)) > 0.55:
+        negative_signals.append("zbyt dużo zieleni wokół obiektu")
+
+    if float(evidence.get("redRoofContextRatio", 0)) > 0.24:
+        negative_signals.append("kontekst może wskazywać dach lub element budynku")
+
+    if accepted:
+        candidate_type = "prawdopodobna koperta parkingowa dla OzN"
+        review_summary = (
+            "Kandydat spełnia warunki: niebieskie pole, białe oznakowanie, "
+            "ślady obrysu prostokąta oraz utwardzone otoczenie. Wymaga ręcznej weryfikacji."
+        )
+    else:
+        candidate_type = f"odrzucony kandydat: {describe_rejection_reason(reason)}"
+        review_summary = (
+            "Obiekt nie spełnia wszystkich warunków koperty. "
+            f"Powód: {describe_rejection_reason(reason)}."
+        )
+
+    confidence_level = (
+        "wysoka" if confidence >= 0.82 else "średnia" if confidence >= 0.64 else "niska"
+    )
+
+    return {
+        "isLikelyDisabledParkingEnvelope": bool(accepted),
+        "isLikelyRealEnvelope": bool(accepted),
+        "humanReviewRequired": True,
+        "candidateType": candidate_type,
+        "placeType": place_type,
+        "confidenceLevel": confidence_level,
+        "reviewSummary": review_summary,
+        "rejectionReason": None if accepted else reason,
+        "rejectionReasonLabel": None if accepted else describe_rejection_reason(reason),
+        "positiveSignals": positive_signals,
+        "negativeSignals": negative_signals,
+        "osmActionRecommended": bool(accepted),
+    }
+
+
 def classify_patch(
     *,
     patch_masks: dict[str, np.ndarray],
@@ -810,7 +1006,15 @@ def detect_blue_candidates(
             mercator_bbox,
         )
 
+        assessment = build_candidate_assessment(
+            accepted=accepted,
+            confidence=confidence,
+            reason=reason,
+            evidence=evidence,
+        )
+
         evidence["reason"] = reason
+        evidence["candidateAssessment"] = assessment
         evidence["rotatedRectPixels"] = {
             "centerX": int(center_x),
             "centerY": int(center_y),
@@ -820,10 +1024,18 @@ def detect_blue_candidates(
         }
 
         if accepted:
+            evidence["detectorScore"] = round(confidence, 4)
+            evidence["ruleMatchPercent"] = 100
+            evidence["ruleMatchStatus"] = "full_match"
+            evidence["ruleMatchDescription"] = (
+                "Obiekt spełnia 100% twardych reguł GTK: niebieskie pole, "
+                "białe oznakowanie, biały obrys, kontekst parkingowy i brak cech pojazdu/dachu."
+            )
+
             candidate = {
                 "lat": round(lat, 7),
                 "lng": round(lng, 7),
-                "confidence": round(confidence, 4),
+                "confidence": 1.0,
                 "modelVersion": MODEL_VERSION,
                 "detectionHash": (
                     f"{MODEL_VERSION}:"
@@ -833,6 +1045,14 @@ def detect_blue_candidates(
                     f"{round(confidence, 4)}"
                 ),
                 "imagerySource": IMAGERY_SOURCE,
+                "thumbnailUrl": make_candidate_thumbnail_data_url(image, field_box),
+                "bbox": pixel_bbox_to_wgs84_bbox(field_box, width, height, mercator_bbox),
+                "candidateType": assessment["candidateType"],
+                "placeType": assessment["placeType"],
+                "reviewSummary": assessment["reviewSummary"],
+                "isLikelyDisabledParkingEnvelope": assessment[
+                    "isLikelyDisabledParkingEnvelope"
+                ],
                 "evidence": evidence,
             }
 
@@ -858,6 +1078,9 @@ def detect_blue_candidates(
                     "lng": round(lng, 7),
                     "confidence": round(confidence, 4),
                     "reason": reason,
+                    "candidateType": assessment["candidateType"],
+                    "placeType": assessment["placeType"],
+                    "reviewSummary": assessment["reviewSummary"],
                     "evidence": evidence,
                 }
             )

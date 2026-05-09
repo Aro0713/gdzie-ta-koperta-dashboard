@@ -387,9 +387,11 @@ function buildAiCandidatePopupHtml(
   return `
     <div class="osm-popup gtk-ai-popup">
       <strong>Kandydat AI GTK</strong>
-      <span>Wykryty automatycznie na ortofotomapie. Wymaga weryfikacji człowieka przed zapisem do OSM.</span>
+      <span>
+        Kandydat spełnia 100% twardych reguł detekcji GTK. Nadal wymaga weryfikacji człowieka przed zapisem do OSM.
+      </span>
       <dl>
-        <dt>Pewność</dt>
+        <dt>Zgodność reguł</dt>
         <dd>${escapeHtml(formatCandidateConfidence(candidate.confidence))}</dd>
         <dt>Status</dt>
         <dd>${escapeHtml(candidate.status)}</dd>
