@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Header } from "@/components/Header";
-import { KopertyMap } from "@/components/KopertyMap";
+import { KopertyMap, type RouteMapOverlay } from "@/components/KopertyMap";
 import {
   formatMeters,
   formatObjectType,
@@ -21,6 +21,7 @@ type RouteAssistantResponse = {
   };
   recommendedSpot?: OsmParkingFeature | null;
   alternatives?: OsmParkingFeature[];
+  route?: RouteMapOverlay["route"];
   routeSummary?: {
     distanceMeters: number | null;
     durationSeconds: number | null;
@@ -37,6 +38,7 @@ export default function MapaPage() {
   const [assistantQuery, setAssistantQuery] = useState("");
   const [assistantResult, setAssistantResult] =
     useState<RouteAssistantResponse | null>(null);
+  const [routeOverlay, setRouteOverlay] = useState<RouteMapOverlay | null>(null);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantError, setAssistantError] = useState<string | null>(null);
 
@@ -79,6 +81,7 @@ export default function MapaPage() {
     setAssistantLoading(true);
     setAssistantError(null);
     setAssistantResult(null);
+    setRouteOverlay(null);
 
     try {
       const position = await getCurrentPosition();
@@ -102,6 +105,11 @@ export default function MapaPage() {
       }
 
       setAssistantResult(data);
+      setRouteOverlay({
+        route: data.route || null,
+        destination: data.destination || null,
+        recommendedSpot: data.recommendedSpot || null
+      });
     } catch (error) {
       const message =
         error instanceof Error
@@ -109,6 +117,7 @@ export default function MapaPage() {
           : "Nieznany błąd asystenta dojazdu.";
 
       setAssistantError(message);
+      setRouteOverlay(null);
     } finally {
       setAssistantLoading(false);
     }
@@ -132,7 +141,11 @@ export default function MapaPage() {
 
       <section className="dashboard-grid dashboard-grid-map">
         <div className="panel panel-large">
-          <KopertyMap full onOsmData={setOsmData} />
+          <KopertyMap
+            full
+            routeOverlay={routeOverlay}
+            onOsmData={setOsmData}
+          />
         </div>
 
         <aside className="panel osm-sidebar route-assistant-sidebar">

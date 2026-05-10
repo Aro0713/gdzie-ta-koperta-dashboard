@@ -3276,3 +3276,80 @@ textarea {
 .route-assistant-compact-list {
   max-height: 300px;
 }
+/* --- GTK: route overlay on map --- */
+
+.route-destination-marker {
+  display: grid !important;
+  place-items: center !important;
+  width: 48px !important;
+  height: 48px !important;
+  border: 3px solid white !important;
+  border-radius: 999px !important;
+  color: white !important;
+  background: linear-gradient(135deg, #0f172a, #2563eb) !important;
+  box-shadow:
+    0 16px 38px rgba(15, 23, 42, 0.34),
+    0 0 0 6px rgba(37, 99, 235, 0.16) !important;
+}
+
+.route-destination-marker span {
+  display: grid !important;
+  place-items: center !important;
+  font-size: 0.7rem !important;
+  font-weight: 1000 !important;
+  letter-spacing: 0.04em !important;
+}
+
+.route-recommended-parking-marker {
+  display: grid !important;
+  place-items: center !important;
+  width: 58px !important;
+  height: 58px !important;
+  border: 4px solid white !important;
+  border-radius: 999px !important;
+  color: white !important;
+  background: linear-gradient(135deg, #7c3aed, #16a34a) !important;
+  box-shadow:
+    0 18px 44px rgba(124, 58, 237, 0.42),
+    0 0 0 8px rgba(124, 58, 237, 0.14) !important;
+  animation: routeRecommendedPulse 1.7s ease-in-out infinite;
+}
+
+.route-recommended-parking-marker span {
+  display: grid !important;
+  width: 30px !important;
+  height: 30px !important;
+  place-items: center !important;
+  font-size: 1.2rem !important;
+  line-height: 1 !important;
+  font-weight: 1000 !important;
+}
+
+.route-recommended-parking-marker small {
+  display: block !important;
+  margin-top: -8px !important;
+  padding: 1px 6px !important;
+  border-radius: 999px !important;
+  color: #581c87 !important;
+  background: white !important;
+  font-size: 0.5rem !important;
+  line-height: 1.1 !important;
+  font-weight: 1000 !important;
+}
+
+.route-popup {
+  min-width: 240px;
+}
+
+@keyframes routeRecommendedPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(124, 58, 237, 0.2));
+  }
+
+  50% {
+    transform: scale(1.08);
+    filter: drop-shadow(0 0 12px rgba(124, 58, 237, 0.38));
+  }
+}

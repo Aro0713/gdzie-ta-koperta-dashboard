@@ -107,11 +107,30 @@ export type UserAddedSpot = {
   lastConfirmedAt?: string;
 };
 
+export type RouteMapOverlay = {
+  route?: {
+    type?: string;
+    features?: Array<{
+      geometry?: {
+        type?: string;
+        coordinates?: number[][];
+      };
+    }>;
+  } | null;
+  destination?: {
+    name?: string;
+    lat: number;
+    lng: number;
+  } | null;
+  recommendedSpot?: OsmParkingFeature | null;
+};
+
 type KopertyMapMode = "near-user" | "gtk-country";
 
 type KopertyMapProps = {
   full?: boolean;
   mode?: KopertyMapMode;
+  routeOverlay?: RouteMapOverlay | null;
   onOsmData?: (data: OsmParkingResponse) => void;
   onUserSpotsChange?: (spots: UserAddedSpot[]) => void;
 };
@@ -388,8 +407,19 @@ function buildAiCandidatePopupHtml(
     <div class="osm-popup gtk-ai-popup">
       <strong>Kandydat AI GTK</strong>
       <span>
-        Kandydat spełnia 100% twardych reguł detekcji GTK. Nadal wymaga weryfikacji człowieka przed zapisem do OSM.
+        Kandydat spełnia wysoki próg zgodności reguł GTK. Nadal wymaga weryfikacji człowieka przed zapisem do OSM.
       </span>
+      ${
+        candidate.thumbnailUrl
+          ? `<img
+              class="gtk-ai-candidate-preview"
+              src="${escapeHtml(candidate.thumbnailUrl)}"
+              alt="Podgląd kandydata AI GTK"
+            />`
+          : `<div class="gtk-ai-candidate-preview-empty">
+              Brak miniatury — kandydat został dodany przed włączeniem podglądu.
+            </div>`
+      }
       <dl>
         <dt>Zgodność reguł</dt>
         <dd>${escapeHtml(formatCandidateConfidence(candidate.confidence))}</dd>
@@ -438,6 +468,7 @@ function buildAiCandidatePopupHtml(
 export function KopertyMap({
   full = false,
   mode = "near-user",
+  routeOverlay = null,
   onOsmData,
   onUserSpotsChange
 }: KopertyMapProps) {
@@ -451,6 +482,7 @@ export function KopertyMap({
   const osmLayer = useRef<import("leaflet").LayerGroup | null>(null);
   const userAddedLayer = useRef<import("leaflet").LayerGroup | null>(null);
   const aiCandidatesLayer = useRef<import("leaflet").LayerGroup | null>(null);
+  const routeLayer = useRef<import("leaflet").LayerGroup | null>(null);
   const userSpotsHydrated = useRef(false);
   const pendingUserSpotPopupId = useRef<string | null>(null);
   const userPosition = useRef<{ lat: number; lng: number } | null>(null);
@@ -474,9 +506,9 @@ export function KopertyMap({
     useState<NonNullable<OsmMeResponse["user"]> | null>(null);
   const [aiCandidates, setAiCandidates] = useState<AiCandidate[]>([]);
   const [loadingAiCandidates, setLoadingAiCandidates] = useState(false);
-  const [handlingAiCandidateId, setHandlingAiCandidateId] = useState<string | null>(
-    null
-  );
+  const [handlingAiCandidateId, setHandlingAiCandidateId] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     let mounted = true;
@@ -578,6 +610,7 @@ export function KopertyMap({
       userSpotsHydrated.current = true;
       setUserAddedSpots(localSpots);
       drawUserAddedSpots(localSpots, L, map);
+      drawRouteOverlay(routeOverlay, L, map);
 
       void loadAiCandidates();
 
@@ -760,6 +793,10 @@ export function KopertyMap({
   }, [aiCandidates, osmUser, handlingAiCandidateId]);
 
   useEffect(() => {
+    drawRouteOverlay(routeOverlay);
+  }, [routeOverlay]);
+
+  useEffect(() => {
     if (userAddedSpots.length === 0 && showRemoveChooser) {
       setShowRemoveChooser(false);
     }
@@ -790,6 +827,179 @@ export function KopertyMap({
       map.removeLayer(aiCandidatesLayer.current);
       aiCandidatesLayer.current = null;
     }
+  }
+
+  function clearRouteLayer(forcedMap?: import("leaflet").Map) {
+    const map = forcedMap || leafletMap.current;
+
+    if (map && routeLayer.current) {
+      map.removeLayer(routeLayer.current);
+      routeLayer.current = null;
+    }
+  }
+
+  function hasValidCoordinates(lat: number, lng: number) {
+    return (
+      Number.isFinite(lat) &&
+      Number.isFinite(lng) &&
+      lat >= -90 &&
+      lat <= 90 &&
+      lng >= -180 &&
+      lng <= 180
+    );
+  }
+
+  function drawRouteOverlay(
+    overlay?: RouteMapOverlay | null,
+    forcedL?: LeafletWithCluster,
+    forcedMap?: import("leaflet").Map
+  ) {
+    const L = forcedL || leafletApi.current;
+    const map = forcedMap || leafletMap.current;
+
+    if (!L || !map) {
+      return;
+    }
+
+    clearRouteLayer(map);
+
+    if (!overlay) {
+      return;
+    }
+
+    const layer = L.layerGroup();
+    const boundsPoints: Array<[number, number]> = [];
+
+    const routeFeature = overlay.route?.features?.[0];
+    const routeCoordinates =
+      routeFeature?.geometry?.type === "LineString" &&
+      Array.isArray(routeFeature.geometry.coordinates)
+        ? routeFeature.geometry.coordinates
+        : [];
+
+    const routeLatLngs = routeCoordinates
+      .map((coordinate) => {
+        const lng = Number(coordinate[0]);
+        const lat = Number(coordinate[1]);
+
+        if (!hasValidCoordinates(lat, lng)) {
+          return null;
+        }
+
+        return [lat, lng] as [number, number];
+      })
+      .filter((point): point is [number, number] => Boolean(point));
+
+    if (routeLatLngs.length > 1) {
+      const routeLine = L.polyline(routeLatLngs, {
+        color: "#7c3aed",
+        weight: 6,
+        opacity: 0.86,
+        lineCap: "round",
+        lineJoin: "round"
+      });
+
+      layer.addLayer(routeLine);
+      boundsPoints.push(...routeLatLngs);
+    }
+
+    if (
+      overlay.destination &&
+      hasValidCoordinates(overlay.destination.lat, overlay.destination.lng)
+    ) {
+      const destinationIcon = L.divIcon({
+        className: "route-destination-marker",
+        html: "<span>CEL</span>",
+        iconSize: [48, 48],
+        iconAnchor: [24, 24],
+        popupAnchor: [0, -18]
+      });
+
+      const destinationMarker = L.marker(
+        [overlay.destination.lat, overlay.destination.lng],
+        {
+          icon: destinationIcon,
+          zIndexOffset: 1800
+        }
+      ).bindPopup(
+        `
+          <div class="osm-popup route-popup">
+            <strong>Cel podróży</strong>
+            <span>${escapeHtml(overlay.destination.name || "Wybrany cel")}</span>
+          </div>
+        `
+      );
+
+      layer.addLayer(destinationMarker);
+      boundsPoints.push([overlay.destination.lat, overlay.destination.lng]);
+    }
+
+    if (overlay.recommendedSpot) {
+      const coordinates = overlay.recommendedSpot.geometry.coordinates;
+      const lng = Number(coordinates[0]);
+      const lat = Number(coordinates[1]);
+
+      if (hasValidCoordinates(lat, lng)) {
+        const properties = overlay.recommendedSpot.properties || {};
+
+        const parkingIcon = L.divIcon({
+          className: "route-recommended-parking-marker",
+          html: `
+            <span>♿</span>
+            <small>POSTÓJ</small>
+          `,
+          iconSize: [58, 58],
+          iconAnchor: [29, 29],
+          popupAnchor: [0, -22]
+        });
+
+        const parkingMarker = L.marker([lat, lng], {
+          icon: parkingIcon,
+          zIndexOffset: 1900
+        }).bindPopup(
+          `
+            <div class="osm-popup route-popup">
+              <strong>Rekomendowane miejsce postoju</strong>
+              <span>${escapeHtml(getOsmTitle(properties))}</span>
+              <dl>
+                <dt>Typ</dt>
+                <dd>${escapeHtml(formatObjectType(properties.objectType))}</dd>
+                <dt>Odległość od celu</dt>
+                <dd>${escapeHtml(formatMeters(properties.distanceMeters))}</dd>
+                <dt>Nawierzchnia</dt>
+                <dd>${escapeHtml(properties.surface || "brak danych")}</dd>
+                <dt>Dostęp</dt>
+                <dd>${escapeHtml(properties.access || "brak danych")}</dd>
+              </dl>
+              ${
+                properties.osmUrl
+                  ? `<a href="${escapeHtml(
+                      properties.osmUrl
+                    )}" target="_blank" rel="noreferrer">Zobacz w OpenStreetMap</a>`
+                  : ""
+              }
+            </div>
+          `
+        );
+
+        layer.addLayer(parkingMarker);
+        boundsPoints.push([lat, lng]);
+      }
+    }
+
+    layer.addTo(map);
+    routeLayer.current = layer;
+
+    if (boundsPoints.length > 1) {
+      map.fitBounds(L.latLngBounds(boundsPoints), {
+        padding: [42, 42],
+        maxZoom: 17
+      });
+    } else if (boundsPoints.length === 1) {
+      map.setView(boundsPoints[0], 17);
+    }
+
+    keepUserLocationVisible();
   }
 
   function keepUserLocationVisible() {
