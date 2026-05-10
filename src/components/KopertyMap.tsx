@@ -881,43 +881,60 @@ export function KopertyMap({
     const layer = L.layerGroup();
     const boundsPoints: Array<[number, number]> = [];
 
-    const normalizedRouteCoordinates = Array.isArray(overlay.routeCoordinates)
-    ? overlay.routeCoordinates
-    : [];
+    const routeLatLngsFromNormalized = Array.isArray(overlay.routeCoordinates)
+      ? overlay.routeCoordinates
+          .map((coordinate) => {
+            const lat = Number(coordinate.lat);
+            const lng = Number(coordinate.lng);
 
-    const routeFeature = overlay.route?.features?.[0];
+            if (!hasValidCoordinates(lat, lng)) {
+              return null;
+            }
+
+            return [lat, lng] as [number, number];
+          })
+          .filter((point): point is [number, number] => Boolean(point))
+      : [];
+
     const rawRouteCoordinates =
-      routeFeature?.geometry?.type === "LineString" &&
-      Array.isArray(routeFeature.geometry.coordinates)
-        ? routeFeature.geometry.coordinates
+      overlay.route?.features?.[0]?.geometry?.type === "LineString" &&
+      Array.isArray(overlay.route.features[0].geometry.coordinates)
+        ? overlay.route.features[0].geometry.coordinates
         : [];
 
+    const routeLatLngsFromRaw = rawRouteCoordinates
+      .map((coordinate) => {
+        const lng = Number(coordinate[0]);
+        const lat = Number(coordinate[1]);
+
+        if (!hasValidCoordinates(lat, lng)) {
+          return null;
+        }
+
+        return [lat, lng] as [number, number];
+      })
+      .filter((point): point is [number, number] => Boolean(point));
+
     const routeLatLngs =
-      normalizedRouteCoordinates.length > 0
-        ? normalizedRouteCoordinates
-            .map((coordinate) => {
-              const lat = Number(coordinate.lat);
-              const lng = Number(coordinate.lng);
+      routeLatLngsFromNormalized.length > 1
+        ? routeLatLngsFromNormalized
+        : routeLatLngsFromRaw;
 
-              if (!hasValidCoordinates(lat, lng)) {
-                return null;
-              }
+    let routeLine: import("leaflet").Polyline | null = null;
 
-              return [lat, lng] as [number, number];
-            })
-            .filter((point): point is [number, number] => Boolean(point))
-        : rawRouteCoordinates
-            .map((coordinate) => {
-              const lng = Number(coordinate[0]);
-              const lat = Number(coordinate[1]);
+    if (routeLatLngs.length > 1) {
+      routeLine = L.polyline(routeLatLngs, {
+        color: "#7c3aed",
+        weight: 8,
+        opacity: 0.95,
+        lineCap: "round",
+        lineJoin: "round",
+        interactive: false
+      });
 
-              if (!hasValidCoordinates(lat, lng)) {
-                return null;
-              }
-
-              return [lat, lng] as [number, number];
-            })
-            .filter((point): point is [number, number] => Boolean(point));
+      layer.addLayer(routeLine);
+      boundsPoints.push(...routeLatLngs);
+    }
 
     if (
       overlay.currentPosition &&
@@ -951,6 +968,10 @@ export function KopertyMap({
       );
 
       layer.addLayer(navigationUserMarker);
+      boundsPoints.push([
+        overlay.currentPosition.lat,
+        overlay.currentPosition.lng
+      ]);
     }
 
     if (
@@ -1039,6 +1060,10 @@ export function KopertyMap({
 
     layer.addTo(map);
     routeLayer.current = layer;
+
+    if (routeLine) {
+      routeLine.bringToFront();
+    }
 
     if (
       overlay.fitMode === "follow" &&
