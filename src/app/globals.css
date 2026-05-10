@@ -3142,3 +3142,137 @@ textarea {
     text-align: left;
   }
 }
+/* --- GTK: route assistant panel --- */
+
+.route-assistant-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.route-assistant-form {
+  display: grid;
+  gap: 12px;
+}
+
+.route-assistant-form label {
+  display: grid;
+  gap: 8px;
+  color: #344054;
+  font-weight: 900;
+}
+
+.route-assistant-submit {
+  width: 100%;
+}
+
+.route-assistant-error {
+  padding: 12px 14px;
+  border-radius: 16px;
+  color: #7f1d1d;
+  background: rgba(239, 68, 68, 0.1);
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.route-assistant-result {
+  display: grid;
+  gap: 14px;
+  padding: 15px;
+  border: 1px solid rgba(20, 119, 212, 0.16);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at top left, rgba(38, 183, 255, 0.12), transparent 18rem),
+    rgba(255, 255, 255, 0.78);
+}
+
+.route-assistant-result > strong {
+  color: var(--blue-dark);
+  font-size: 0.82rem;
+  font-weight: 1000;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.route-assistant-result > p {
+  margin: 0;
+  color: #243044;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.route-assistant-block {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(20, 119, 212, 0.08);
+}
+
+.route-assistant-block span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.route-assistant-block strong {
+  color: var(--surface-dark);
+  line-height: 1.35;
+}
+
+.route-assistant-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.route-assistant-meta span,
+.route-assistant-alt {
+  padding: 8px 10px;
+  border-radius: 999px;
+  color: #0c4a8a;
+  background: rgba(20, 119, 212, 0.1);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.route-assistant-spot-card {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.route-assistant-alternatives {
+  display: grid;
+  gap: 8px;
+}
+
+.route-assistant-alternatives > strong {
+  color: var(--surface-dark);
+}
+
+.route-assistant-alt {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 14px;
+}
+
+.route-assistant-alt span {
+  color: #344054;
+}
+
+.route-assistant-alt strong {
+  color: var(--blue-dark);
+}
+
+.route-assistant-nearby {
+  display: grid;
+  gap: 10px;
+}
+
+.route-assistant-mini-header {
+  margin-bottom: 0;
+}
+
+.route-assistant-compact-list {
+  max-height: 300px;
+}

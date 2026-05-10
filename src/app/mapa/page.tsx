@@ -1,186 +1,307 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Header } from "@/components/Header";
 import { KopertyMap } from "@/components/KopertyMap";
 import {
   formatMeters,
   formatObjectType,
   getOsmTitle,
+  type OsmParkingFeature,
   type OsmParkingResponse
 } from "@/lib/osmParking";
 
-type MapMode = "near-user" | "gtk-country";
+type RouteAssistantResponse = {
+  ok?: boolean;
+  query?: string;
+  destination?: {
+    name: string;
+    lat: number;
+    lng: number;
+  };
+  recommendedSpot?: OsmParkingFeature | null;
+  alternatives?: OsmParkingFeature[];
+  routeSummary?: {
+    distanceMeters: number | null;
+    durationSeconds: number | null;
+    distanceLabel: string;
+    durationLabel: string;
+  };
+  answer?: string;
+  error?: string;
+  details?: unknown;
+};
 
 export default function MapaPage() {
   const [osmData, setOsmData] = useState<OsmParkingResponse | null>(null);
-  const [mapMode, setMapMode] = useState<MapMode | null>(null);
+  const [assistantQuery, setAssistantQuery] = useState("");
+  const [assistantResult, setAssistantResult] =
+    useState<RouteAssistantResponse | null>(null);
+  const [assistantLoading, setAssistantLoading] = useState(false);
+  const [assistantError, setAssistantError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const requestedView = params.get("widok");
-
-    setMapMode(requestedView === "gtk-kraj" ? "gtk-country" : "near-user");
-  }, []);
-
-  const isGtkCountryView = mapMode === "gtk-country";
-
-  const visibleFeatures = useMemo(() => {
-    const features = [...(osmData?.features || [])];
-
-    if (isGtkCountryView) {
-      return features
-        .sort((a, b) => {
-          const firstId = String(a.properties?.osmId || "");
-          const secondId = String(b.properties?.osmId || "");
-
-          return firstId.localeCompare(secondId);
-        })
-        .slice(0, 24);
-    }
-
-    return features
+  const nearestFeatures = useMemo(() => {
+    return [...(osmData?.features || [])]
       .sort((a, b) => {
         const first = a.properties?.distanceMeters ?? Number.MAX_SAFE_INTEGER;
         const second = b.properties?.distanceMeters ?? Number.MAX_SAFE_INTEGER;
 
         return first - second;
       })
-      .slice(0, 12);
-  }, [osmData, isGtkCountryView]);
+      .slice(0, 6);
+  }, [osmData]);
 
   const totalCount = osmData?.metadata?.count ?? osmData?.features.length ?? 0;
+
+  function getCurrentPosition() {
+    return new Promise<GeolocationPosition>((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Ta przeglądarka nie obsługuje geolokalizacji."));
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 60000
+      });
+    });
+  }
+
+  async function submitRouteAssistant() {
+    const query = assistantQuery.trim();
+
+    if (!query) {
+      setAssistantError("Wpisz cel podróży.");
+      return;
+    }
+
+    setAssistantLoading(true);
+    setAssistantError(null);
+    setAssistantResult(null);
+
+    try {
+      const position = await getCurrentPosition();
+
+      const response = await fetch("/api/route-assistant", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          query,
+          userLat: position.coords.latitude,
+          userLng: position.coords.longitude
+        })
+      });
+
+      const data = (await response.json()) as RouteAssistantResponse;
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Nie udało się wyznaczyć trasy.");
+      }
+
+      setAssistantResult(data);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Nieznany błąd asystenta dojazdu.";
+
+      setAssistantError(message);
+    } finally {
+      setAssistantLoading(false);
+    }
+  }
+
+  const recommendedProperties = assistantResult?.recommendedSpot?.properties;
 
   return (
     <main className="page-shell">
       <Header />
 
       <section className="subpage-hero">
-        <p className="eyebrow">
-          {isGtkCountryView ? "pełny widok GTK" : "pełny widok"}
-        </p>
-
-        <h1>{isGtkCountryView ? "Koperty GTK w Polsce" : "Mapa kopert"}</h1>
-
+        <p className="eyebrow">pełny widok</p>
+        <h1>Mapa kopert</h1>
         <p>
-          {isGtkCountryView
-            ? "Mapa pokazuje koperty dodane przez użytkowników GTK do OpenStreetMap. Widok obejmuje całą Polskę i nie jest ograniczony promieniem 5 km."
-            : "Mapa pokazuje istniejące dane z OpenStreetMap w promieniu wybranym przez użytkownika. Dodawanie nowych kopert odbywa się bezpośrednio na mapie, z konta OpenStreetMap."}
+          Mapa pokazuje istniejące dane z OpenStreetMap w promieniu wybranym
+          przez użytkownika. Dodawanie nowych kopert odbywa się bezpośrednio
+          na mapie, z konta OpenStreetMap.
         </p>
       </section>
 
       <section className="dashboard-grid dashboard-grid-map">
         <div className="panel panel-large">
-          {mapMode ? (
-            <KopertyMap full mode={mapMode} onOsmData={setOsmData} />
-          ) : (
-            <div className="empty-state-card">
-              <strong>Ładuję mapę</strong>
-              <span>Sprawdzam, który widok mapy uruchomić.</span>
-            </div>
-          )}
+          <KopertyMap full onOsmData={setOsmData} />
         </div>
 
-        <aside className="panel osm-sidebar">
+        <aside className="panel osm-sidebar route-assistant-sidebar">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">
-                {isGtkCountryView ? "koperty GTK" : "punkty OSM"}
+              <p className="eyebrow">asystent dojazdu</p>
+              <h2>Dokąd jedziesz?</h2>
+              <p className="dashboard-map-note">
+                Wpisz cel podróży. Wskażę najbliższą kopertę lub parking dla
+                OzN i policzę trasę dojazdu.
               </p>
-              <h2>
-                {isGtkCountryView
-                  ? "Dodane przez GTK"
-                  : "Najbliższe miejsca"}
-              </h2>
             </div>
-
-            <span className="map-status-pill">{totalCount}</span>
           </div>
 
-          {!osmData ? (
-            <div className="empty-state-card">
-              <strong>
-                {isGtkCountryView
-                  ? "Pobieram koperty GTK"
-                  : "Czekam na lokalizację"}
-              </strong>
-              <span>
-                {isGtkCountryView
-                  ? "Pobieram z OpenStreetMap koperty oznaczone jako dodane przez GdzieTaKoperta."
-                  : "Po zgodzie przeglądarki pokażę najbliższe koperty i parkingi oznaczone w OpenStreetMap."}
-              </span>
-            </div>
-          ) : visibleFeatures.length === 0 ? (
-            <div className="empty-state-card">
-              <strong>
-                {isGtkCountryView
-                  ? "Brak kopert GTK w OSM"
-                  : "Brak punktów w OSM"}
-              </strong>
-              <span>
-                {isGtkCountryView
-                  ? "Overpass nie zwrócił jeszcze kopert oznaczonych tagiem GTK. Świeże edycje mogą pojawić się po krótkiej synchronizacji."
-                  : "To nie musi oznaczać braku kopert w okolicy. Może oznaczać, że nikt jeszcze nie naniósł ich do OSM."}
-              </span>
+          <form
+            className="route-assistant-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitRouteAssistant();
+            }}
+          >
+            <label>
+              Cel podróży
+              <input
+                value={assistantQuery}
+                onChange={(event) => setAssistantQuery(event.target.value)}
+                placeholder="np. Spodek Katowice"
+                type="text"
+              />
+            </label>
+
+            <button
+              type="submit"
+              className="primary-button route-assistant-submit"
+              disabled={assistantLoading}
+            >
+              {assistantLoading ? "Szukam…" : "Pokaż trasę"}
+            </button>
+          </form>
+
+          {assistantError ? (
+            <div className="route-assistant-error">{assistantError}</div>
+          ) : null}
+
+          {assistantResult ? (
+            <div className="route-assistant-result">
+              <strong>Rekomendacja</strong>
+
+              <p>{assistantResult.answer}</p>
+
+              {assistantResult.destination ? (
+                <div className="route-assistant-block">
+                  <span>Cel</span>
+                  <strong>{assistantResult.destination.name}</strong>
+                </div>
+              ) : null}
+
+              {assistantResult.routeSummary ? (
+                <div className="route-assistant-meta">
+                  <span>
+                    Trasa: {assistantResult.routeSummary.distanceLabel}
+                  </span>
+                  <span>
+                    Czas: {assistantResult.routeSummary.durationLabel}
+                  </span>
+                </div>
+              ) : null}
+
+              {recommendedProperties ? (
+                <article className="osm-side-card route-assistant-spot-card">
+                  <div className="osm-side-card-top">
+                    <div>
+                      <h3>{getOsmTitle(recommendedProperties)}</h3>
+                      <p>{formatObjectType(recommendedProperties.objectType)}</p>
+                    </div>
+
+                    <span>
+                      {formatMeters(recommendedProperties.distanceMeters)}
+                    </span>
+                  </div>
+
+                  <div className="osm-side-meta">
+                    <span>
+                      OzN:{" "}
+                      {recommendedProperties.capacityDisabled || "brak danych"}
+                    </span>
+                    <span>
+                      nawierzchnia:{" "}
+                      {recommendedProperties.surface || "brak danych"}
+                    </span>
+                    <span>
+                      dostęp: {recommendedProperties.access || "brak danych"}
+                    </span>
+                  </div>
+
+                  {recommendedProperties.osmUrl ? (
+                    <div className="osm-side-actions">
+                      <a
+                        href={recommendedProperties.osmUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-link"
+                      >
+                        Zobacz w OSM
+                      </a>
+                    </div>
+                  ) : null}
+                </article>
+              ) : null}
+
+              {assistantResult.alternatives &&
+              assistantResult.alternatives.length > 0 ? (
+                <div className="route-assistant-alternatives">
+                  <strong>Alternatywy</strong>
+
+                  {assistantResult.alternatives.slice(0, 3).map((feature) => {
+                    const properties = feature.properties || {};
+                    const key = `${properties.osmType}-${properties.osmId}`;
+
+                    return (
+                      <article className="route-assistant-alt" key={key}>
+                        <span>{getOsmTitle(properties)}</span>
+                        <strong>{formatMeters(properties.distanceMeters)}</strong>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
           ) : (
-            <div className="osm-side-list">
-              {visibleFeatures.map((feature, index) => {
-                const properties = feature.properties || {};
-                const key = `${properties.osmType || "feature"}-${
-                  properties.osmId || index
-                }`;
-
-                return (
-                  <article className="osm-side-card" key={key}>
-                    <div className="osm-side-card-top">
-                      <div>
-                        <h3>{getOsmTitle(properties)}</h3>
-                        <p>{formatObjectType(properties.objectType)}</p>
-                      </div>
-
-                      <span>
-                        {isGtkCountryView
-                          ? "GTK"
-                          : formatMeters(properties.distanceMeters)}
-                      </span>
-                    </div>
-
-                    <div className="osm-side-meta">
-                      {isGtkCountryView ? (
-                        <span>OSM ID: {properties.osmId || "brak danych"}</span>
-                      ) : (
-                        <span>
-                          OzN: {properties.capacityDisabled || "brak danych"}
-                        </span>
-                      )}
-
-                      <span>
-                        nawierzchnia: {properties.surface || "brak danych"}
-                      </span>
-
-                      <span>
-                        dostęp: {properties.access || "brak danych"}
-                      </span>
-                    </div>
-
-                    <div className="osm-side-actions">
-                      {properties.osmUrl ? (
-                        <a
-                          href={properties.osmUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-link"
-                        >
-                          Zobacz w OSM
-                        </a>
-                      ) : null}
-                    </div>
-                  </article>
-                );
-              })}
+            <div className="empty-state-card">
+              <strong>Asystent czeka na cel</strong>
+              <span>
+                Najpierw podaj miejsce, do którego jedziesz. Po zgodzie na
+                lokalizację znajdę najbliższe dostępne miejsce postoju.
+              </span>
             </div>
           )}
+
+          {!assistantResult && nearestFeatures.length > 0 ? (
+            <div className="route-assistant-nearby">
+              <div className="panel-header route-assistant-mini-header">
+                <div>
+                  <p className="eyebrow">punkty OSM</p>
+                  <h3>Najbliższe teraz</h3>
+                </div>
+                <span className="map-status-pill">{totalCount}</span>
+              </div>
+
+              <div className="osm-side-list route-assistant-compact-list">
+                {nearestFeatures.map((feature) => {
+                  const properties = feature.properties || {};
+                  const key = `${properties.osmType}-${properties.osmId}`;
+
+                  return (
+                    <article className="osm-side-card" key={key}>
+                      <div className="osm-side-card-top">
+                        <div>
+                          <h3>{getOsmTitle(properties)}</h3>
+                          <p>{formatObjectType(properties.objectType)}</p>
+                        </div>
+                        <span>{formatMeters(properties.distanceMeters)}</span>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </aside>
       </section>
     </main>
