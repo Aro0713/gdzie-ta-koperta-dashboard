@@ -21,6 +21,56 @@ type DashboardLiveStatsResponse = {
   error?: string;
 };
 
+type GtkOsmStatsResponse = {
+  ok?: boolean;
+  baseline?: {
+    source: string;
+    capturedAt: string;
+    contributors: number;
+    mapChanges: number;
+    changesets: number;
+    createdNodes: number;
+    countries: Array<{
+      country: string;
+      contributors: number;
+      changesets: number;
+      mapChanges: number;
+    }>;
+  };
+  liveSinceRegistry?: {
+    submissions: number;
+    contributors: number;
+    changesets: number;
+  };
+  totals?: {
+    contributors: number;
+    mapChanges: number;
+    changesets: number;
+    createdNodes: number;
+    countries: number;
+    countriesDetail: string;
+  };
+  error?: string;
+};
+
+type AiCandidate = {
+  id: string;
+  status: string;
+  lat: number;
+  lng: number;
+  confidence: number;
+  modelVersion: string;
+  imagerySource?: string | null;
+  thumbnailUrl?: string | null;
+  createdAt: string;
+};
+
+type AiCandidatesResponse = {
+  ok?: boolean;
+  candidates?: AiCandidate[];
+  error?: string;
+};
+
 function formatStatNumber(value: number | undefined | null) {
   const safeValue = Number(value);
 
@@ -39,6 +89,15 @@ export function DashboardHome() {
     useState<DashboardLiveStatsResponse | null>(null);
   const [loadingLiveStats, setLoadingLiveStats] = useState(true);
   const [liveStatsError, setLiveStatsError] = useState(false);
+
+  const [gtkOsmStats, setGtkOsmStats] =
+    useState<GtkOsmStatsResponse | null>(null);
+  const [loadingGtkOsmStats, setLoadingGtkOsmStats] = useState(true);
+  const [gtkOsmStatsError, setGtkOsmStatsError] = useState(false);
+
+  const [aiCandidates, setAiCandidates] = useState<AiCandidate[]>([]);
+  const [loadingAiCandidates, setLoadingAiCandidates] = useState(true);
+  const [aiCandidatesError, setAiCandidatesError] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -81,6 +140,109 @@ export function DashboardHome() {
     intervalId = window.setInterval(() => {
       void loadLiveStats();
     }, 30000);
+
+    return () => {
+      active = false;
+
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let intervalId: number | null = null;
+
+    async function loadGtkOsmStats() {
+      setGtkOsmStatsError(false);
+
+      try {
+        const response = await fetch("/api/dashboard/gtk-osm-stats", {
+          cache: "no-store"
+        });
+
+        const data = (await response.json()) as GtkOsmStatsResponse;
+
+        if (!response.ok || !data.ok || data.error) {
+          throw new Error(data.error || "Nie udało się pobrać statystyk OSM GTK.");
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setGtkOsmStats(data);
+      } catch {
+        if (!active) {
+          return;
+        }
+
+        setGtkOsmStatsError(true);
+      } finally {
+        if (active) {
+          setLoadingGtkOsmStats(false);
+        }
+      }
+    }
+
+    void loadGtkOsmStats();
+
+    intervalId = window.setInterval(() => {
+      void loadGtkOsmStats();
+    }, 60000);
+
+    return () => {
+      active = false;
+
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let intervalId: number | null = null;
+
+    async function loadAiCandidates() {
+      setAiCandidatesError(false);
+
+      try {
+        const response = await fetch("/api/ai-candidates", {
+          cache: "no-store"
+        });
+
+        const data = (await response.json()) as AiCandidatesResponse;
+
+        if (!response.ok || !data.ok || data.error) {
+          throw new Error(data.error || "Nie udało się pobrać kandydatów AI.");
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setAiCandidates(data.candidates || []);
+      } catch {
+        if (!active) {
+          return;
+        }
+
+        setAiCandidates([]);
+        setAiCandidatesError(true);
+      } finally {
+        if (active) {
+          setLoadingAiCandidates(false);
+        }
+      }
+    }
+
+    void loadAiCandidates();
+
+    intervalId = window.setInterval(() => {
+      void loadAiCandidates();
+    }, 60000);
 
     return () => {
       active = false;
@@ -148,57 +310,170 @@ export function DashboardHome() {
 
   const pageViewsDetail =
     loadingLiveStats && !liveStats
-      ? "pobieram dane z Vercel Analytics"
+      ? "Pobieram dane z Vercel Analytics"
       : liveStatsError && !liveStats
-        ? "brak live danych z Vercel Analytics"
-        : "łączna liczba odsłon strony";
+        ? "Brak live danych z Vercel Analytics"
+        : "Łączna liczba odsłon strony";
 
   const visitorsDetail =
     loadingLiveStats && !liveStats
-      ? "pobieram dane z Vercel Analytics"
+      ? "Pobieram dane z Vercel Analytics"
       : liveStatsError && !liveStats
-        ? "brak live danych z Vercel Analytics"
-        : "łączna liczba odwiedzających";
+        ? "Brak live danych z Vercel Analytics"
+        : "Łączna liczba odwiedzających";
 
   const countriesDetail =
     loadingLiveStats && !liveStats
-      ? "pobieram kraje z Vercel Analytics"
+      ? "Pobieram kraje z Vercel Analytics"
       : liveStatsError && !liveStats
-        ? "brak live danych o krajach"
-        : liveStats?.countriesDetail || "brak danych o krajach";
+        ? "Brak live danych o krajach"
+        : liveStats?.countriesDetail || "Brak danych o krajach";
 
-  const stats: StatsCardItem[] = [
-  {
-    label: "Koperty w bazie",
-    value: totalKopertyInVisibleArea,
-    detail: `${osmExactKoperty} dokładnych z OSM + ${userSpots.length} GTK w aktualnym widoku`
-  },
-  {
-    label: "Odsłony strony",
-    value: pageViewsValue,
-    detail: pageViewsDetail
-  },
-  {
-    label: "Odwiedzający",
-    value: visitorsValue,
-    detail: visitorsDetail
-  },
-  {
-    label: "Kraje",
-    value: countriesValue,
-    detail: countriesDetail
-  }
-];
+  const osmAddedValue: string | number = loadingGtkOsmStats
+    ? "…"
+    : gtkOsmStatsError && !gtkOsmStats
+      ? "—"
+      : formatStatNumber(gtkOsmStats?.totals?.createdNodes);
+
+  const osmContributorsValue: string | number = loadingGtkOsmStats
+    ? "…"
+    : gtkOsmStatsError && !gtkOsmStats
+      ? "—"
+      : formatStatNumber(gtkOsmStats?.totals?.contributors);
+
+  const osmChangesetsValue: string | number = loadingGtkOsmStats
+    ? "…"
+    : gtkOsmStatsError && !gtkOsmStats
+      ? "—"
+      : formatStatNumber(gtkOsmStats?.totals?.changesets);
+
+  const osmCountriesValue: string | number = loadingGtkOsmStats
+    ? "…"
+    : gtkOsmStatsError && !gtkOsmStats
+      ? "—"
+      : formatStatNumber(gtkOsmStats?.totals?.countries);
+
+  const osmAddedDetail =
+    loadingGtkOsmStats && !gtkOsmStats
+      ? "Pobieram statystyki OSM GTK"
+      : gtkOsmStatsError && !gtkOsmStats
+        ? "Brak danych statystyk OSM GTK"
+        : "Utworzone punkty OSM powiązane z GdzieTaKoperta";
+
+  const osmContributorsDetail =
+    loadingGtkOsmStats && !gtkOsmStats
+      ? "Pobieram statystyki OSM GTK"
+      : gtkOsmStatsError && !gtkOsmStats
+        ? "Brak danych współtwórców OSM"
+        : "Osoby, które dodały zmiany powiązane z GdzieTaKoperta";
+
+  const osmChangesetsDetail =
+    loadingGtkOsmStats && !gtkOsmStats
+      ? "Pobieram statystyki OSM GTK"
+      : gtkOsmStatsError && !gtkOsmStats
+        ? "Brak danych changesetów OSM"
+        : "Zestawy zmian OSM z hasłem GdzieTaKoperta";
+
+  const osmCountriesDetail =
+    loadingGtkOsmStats && !gtkOsmStats
+      ? "Pobieram kraje zmian OSM"
+      : gtkOsmStatsError && !gtkOsmStats
+        ? "Brak danych krajów zmian OSM"
+        : gtkOsmStats?.totals?.countriesDetail || "Brak danych krajów zmian OSM";
+
+  const aiCandidatesValue: string | number = loadingAiCandidates
+    ? "…"
+    : aiCandidatesError
+      ? "—"
+      : aiCandidates.length;
+
+  const aiCandidatesDetail = loadingAiCandidates
+    ? "Pobieram kandydatów z Neon"
+    : aiCandidatesError
+      ? "Brak danych kandydatów AI"
+      : "Wykryte przez crawlera i czekające na weryfikację";
+
+  const pageStats: StatsCardItem[] = [
+    {
+      label: "Koperty w bazie",
+      value: totalKopertyInVisibleArea,
+      detail: `${osmExactKoperty} dokładnych z OSM + ${userSpots.length} GTK w aktualnym widoku`
+    },
+    {
+      label: "Odsłony strony",
+      value: pageViewsValue,
+      detail: pageViewsDetail
+    },
+    {
+      label: "Odwiedzający",
+      value: visitorsValue,
+      detail: visitorsDetail
+    },
+    {
+      label: "Kraje",
+      value: countriesValue,
+      detail: countriesDetail
+    }
+  ];
+
+  const osmImpactStats: StatsCardItem[] = [
+    {
+      label: "Koperty dodane do OSM",
+      value: osmAddedValue,
+      detail: osmAddedDetail
+    },
+    {
+      label: "Współtwórcy OSM",
+      value: osmContributorsValue,
+      detail: osmContributorsDetail
+    },
+    {
+      label: "Zestawy zmian OSM",
+      value: osmChangesetsValue,
+      detail: osmChangesetsDetail
+    },
+    {
+      label: "Kraje zmian OSM",
+      value: osmCountriesValue,
+      detail: osmCountriesDetail
+    }
+  ];
 
   return (
     <>
-      <StatsCards items={stats} />
+      <StatsCards items={pageStats} />
+
+      <StatsCards items={osmImpactStats} />
+
+      <Link
+        href="/mapa?widok=gtk-kraj"
+        className="dashboard-ai-candidates-card"
+        aria-label={`Kandydaci AI GTK: ${aiCandidatesValue}. ${aiCandidatesDetail}`}
+      >
+        <div className="dashboard-ai-candidates-main">
+          <span className="dashboard-ai-candidates-badge">AI</span>
+
+          <div>
+            <p className="eyebrow">Kandydaci AI</p>
+            <h2>Kandydaci AI GTK</h2>
+            <p>
+              Crawler wykrył potencjalne koperty na ortofotomapie. Kliknij, aby
+              zobaczyć je na mapie i zweryfikować przed wysłaniem do OSM.
+            </p>
+          </div>
+        </div>
+
+        <div className="dashboard-ai-candidates-counter">
+          <strong>{aiCandidatesValue}</strong>
+          <span>{aiCandidatesDetail}</span>
+        </div>
+      </Link>
 
       <section className="dashboard-map-wide">
         <div className="panel panel-large dashboard-map-panel">
           <div className="panel-header dashboard-map-header">
             <div>
-              <p className="eyebrow">mapa</p>
+              <p className="eyebrow">Mapa</p>
               <h2>Koperty i parkingi w Twojej okolicy</h2>
               <p className="dashboard-map-note">
                 ♿ oznacza dokładną kopertę z OSM. P oznacza parking z informacją
@@ -223,7 +498,7 @@ export function DashboardHome() {
       <section className="panel dashboard-last-points-panel">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">realne dane z lokalizacji</p>
+            <p className="eyebrow">Realne dane z lokalizacji</p>
             <h2>Ostatnio pobrane punkty</h2>
             <p className="dashboard-map-note">
               Lista jest budowana z danych OSM pobranych dla aktualnej
@@ -238,6 +513,7 @@ export function DashboardHome() {
               P: {osmParkingWithDisabledCapacity}
             </span>
             <span className="map-status-pill">GTK lokalnie: {userSpots.length}</span>
+            <span className="map-status-pill">AI GTK: {aiCandidates.length}</span>
           </div>
         </div>
 
