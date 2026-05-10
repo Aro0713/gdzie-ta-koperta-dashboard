@@ -7,135 +7,80 @@ import { KopertyMap, type UserAddedSpot } from "@/components/KopertyMap";
 import { StatsCards, type StatsCardItem } from "@/components/StatsCards";
 import type { OsmParkingResponse } from "@/lib/osmParking";
 
-type GtkLiveIndexResponse = OsmParkingResponse & {
-  osmNodeIds?: Array<string | number>;
-};
-
-type AiCandidate = {
-  id: string;
-  status: string;
-  lat: number;
-  lng: number;
-  confidence: number;
-  modelVersion: string;
-  imagerySource?: string | null;
-  thumbnailUrl?: string | null;
-  createdAt: string;
-};
-
-type AiCandidatesResponse = {
+type DashboardLiveStatsResponse = {
   ok?: boolean;
-  candidates?: AiCandidate[];
+  range?: string;
+  pageViews?: number;
+  visitors?: number;
+  countries?: number;
+  countriesDetail?: string;
+  topCountries?: Array<{
+    country: string;
+    views: number;
+  }>;
   error?: string;
 };
+
+function formatStatNumber(value: number | undefined | null) {
+  const safeValue = Number(value);
+
+  if (!Number.isFinite(safeValue)) {
+    return "0";
+  }
+
+  return safeValue.toLocaleString("pl-PL");
+}
 
 export function DashboardHome() {
   const [osmData, setOsmData] = useState<OsmParkingResponse | null>(null);
   const [userSpots, setUserSpots] = useState<UserAddedSpot[]>([]);
 
-  const [gtkLiveData, setGtkLiveData] = useState<OsmParkingResponse | null>(
-    null
-  );
-  const [loadingGtkLiveData, setLoadingGtkLiveData] = useState(true);
-  const [gtkLiveDataError, setGtkLiveDataError] = useState(false);
-
-  const [aiCandidates, setAiCandidates] = useState<AiCandidate[]>([]);
-  const [loadingAiCandidates, setLoadingAiCandidates] = useState(true);
-  const [aiCandidatesError, setAiCandidatesError] = useState(false);
+  const [liveStats, setLiveStats] =
+    useState<DashboardLiveStatsResponse | null>(null);
+  const [loadingLiveStats, setLoadingLiveStats] = useState(true);
+  const [liveStatsError, setLiveStatsError] = useState(false);
 
   useEffect(() => {
     let active = true;
     let intervalId: number | null = null;
 
-    async function loadGtkLiveData() {
-      setGtkLiveDataError(false);
+    async function loadLiveStats() {
+      setLiveStatsError(false);
 
       try {
-        const response = await fetch("/api/osm/gtk-parking?mode=ids", {
+        const response = await fetch("/api/dashboard/live-stats", {
           cache: "no-store"
         });
 
-        const data = (await response.json()) as GtkLiveIndexResponse;
-
-        if (!response.ok || data.error) {
-          throw new Error(data.error || "Nie udało się pobrać GTK z OSM.");
-        }
-
-        if (!active) {
-          return;
-        }
-
-        setGtkLiveData(data);
-      } catch {
-        if (!active) {
-          return;
-        }
-
-        setGtkLiveDataError(true);
-      } finally {
-        if (active) {
-          setLoadingGtkLiveData(false);
-        }
-      }
-    }
-
-    void loadGtkLiveData();
-
-    intervalId = window.setInterval(() => {
-      void loadGtkLiveData();
-    }, 30000);
-
-    return () => {
-      active = false;
-
-      if (intervalId) {
-        window.clearInterval(intervalId);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    let intervalId: number | null = null;
-
-    async function loadAiCandidates() {
-      setAiCandidatesError(false);
-
-      try {
-        const response = await fetch("/api/ai-candidates", {
-          cache: "no-store"
-        });
-
-        const data = (await response.json()) as AiCandidatesResponse;
+        const data = (await response.json()) as DashboardLiveStatsResponse;
 
         if (!response.ok || !data.ok || data.error) {
-          throw new Error(data.error || "Nie udało się pobrać kandydatów AI.");
+          throw new Error(data.error || "Nie udało się pobrać live statystyk.");
         }
 
         if (!active) {
           return;
         }
 
-        setAiCandidates(data.candidates || []);
+        setLiveStats(data);
       } catch {
         if (!active) {
           return;
         }
 
-        setAiCandidates([]);
-        setAiCandidatesError(true);
+        setLiveStatsError(true);
       } finally {
         if (active) {
-          setLoadingAiCandidates(false);
+          setLoadingLiveStats(false);
         }
       }
     }
 
-    void loadAiCandidates();
+    void loadLiveStats();
 
     intervalId = window.setInterval(() => {
-      void loadAiCandidates();
-    }, 60000);
+      void loadLiveStats();
+    }, 30000);
 
     return () => {
       active = false;
@@ -159,12 +104,6 @@ export function DashboardHome() {
     ).length;
   }, [osmData]);
 
-  const confirmedUserSpots = useMemo(() => {
-    return userSpots.filter((spot) => (spot.confirmations || 0) >= 5).length;
-  }, [userSpots]);
-
-  const userSpotsToVerify = Math.max(userSpots.length - confirmedUserSpots, 0);
-
   const visibleFeatures = useMemo(() => {
     return [...(osmData?.features || [])]
       .sort((a, b) => {
@@ -187,127 +126,73 @@ export function DashboardHome() {
       .slice(0, 18);
   }, [osmData]);
 
-  const gtkLiveOsmIds = useMemo(() => {
-    const ids = new Set<string>();
-
-    const liveData = gtkLiveData as GtkLiveIndexResponse | null;
-
-    for (const osmNodeId of liveData?.osmNodeIds || []) {
-      ids.add(String(osmNodeId));
-    }
-
-    for (const feature of gtkLiveData?.features || []) {
-      const osmId = feature.properties?.osmId;
-
-      if (osmId) {
-        ids.add(String(osmId));
-      }
-    }
-
-    return ids;
-  }, [gtkLiveData]);
-
-  const localSubmittedGtkNotYetInLiveOsm = useMemo(() => {
-    return userSpots.filter((spot) => {
-      return (
-        spot.status === "osm_submitted" &&
-        Boolean(spot.osmNodeId) &&
-        !gtkLiveOsmIds.has(String(spot.osmNodeId))
-      );
-    }).length;
-  }, [gtkLiveOsmIds, userSpots]);
-
-  const gtkLiveCount =
-    gtkLiveData?.metadata?.count ??
-    (gtkLiveData as GtkLiveIndexResponse | null)?.osmNodeIds?.length ??
-    gtkLiveData?.features?.length ??
-    0;
-
-  const gtkCountryCount = gtkLiveCount + localSubmittedGtkNotYetInLiveOsm;
-
-  const gtkCountryValue: string | number =
-    loadingGtkLiveData && !gtkLiveData
-      ? "…"
-      : gtkLiveDataError && !gtkLiveData
-        ? "—"
-        : gtkCountryCount;
-
-  const gtkCountryDetail =
-    loadingGtkLiveData && !gtkLiveData
-      ? "pobieram koperty GTK z OpenStreetMap"
-      : gtkLiveDataError && !gtkLiveData
-        ? "brak live danych GTK z OSM"
-        : gtkLiveDataError
-          ? "ostatnie dane live z OSM, odświeżenie nieudane"
-          : localSubmittedGtkNotYetInLiveOsm > 0
-            ? `OSM live + ${localSubmittedGtkNotYetInLiveOsm} świeżo wysłane z tej sesji`
-            : "dodane przez użytkowników GTK w OpenStreetMap";
-
-  const aiCandidatesValue: string | number = loadingAiCandidates
-    ? "…"
-    : aiCandidatesError
-      ? "—"
-      : aiCandidates.length;
-
-  const aiCandidatesDetail = loadingAiCandidates
-    ? "pobieram kandydatów z Neon"
-    : aiCandidatesError
-      ? "brak danych kandydatów AI"
-      : "wykryte przez crawlera i czekające na weryfikację";
-
   const totalKopertyInVisibleArea = osmExactKoperty + userSpots.length;
 
+  const pageViewsValue: string | number = loadingLiveStats
+    ? "…"
+    : liveStatsError && !liveStats
+      ? "—"
+      : formatStatNumber(liveStats?.pageViews);
+
+  const visitorsValue: string | number = loadingLiveStats
+    ? "…"
+    : liveStatsError && !liveStats
+      ? "—"
+      : formatStatNumber(liveStats?.visitors);
+
+  const countriesValue: string | number = loadingLiveStats
+    ? "…"
+    : liveStatsError && !liveStats
+      ? "—"
+      : formatStatNumber(liveStats?.countries);
+
+  const pageViewsDetail =
+    loadingLiveStats && !liveStats
+      ? "pobieram dane z Vercel Analytics"
+      : liveStatsError && !liveStats
+        ? "brak live danych z Vercel Analytics"
+        : "łączna liczba odsłon strony";
+
+  const visitorsDetail =
+    loadingLiveStats && !liveStats
+      ? "pobieram dane z Vercel Analytics"
+      : liveStatsError && !liveStats
+        ? "brak live danych z Vercel Analytics"
+        : "łączna liczba odwiedzających";
+
+  const countriesDetail =
+    loadingLiveStats && !liveStats
+      ? "pobieram kraje z Vercel Analytics"
+      : liveStatsError && !liveStats
+        ? "brak live danych o krajach"
+        : liveStats?.countriesDetail || "brak danych o krajach";
+
   const stats: StatsCardItem[] = [
-    {
-      label: "koperty w bazie",
-      value: totalKopertyInVisibleArea,
-      detail: `${osmExactKoperty} dokładnych z OSM + ${userSpots.length} GTK w aktualnym widoku`
-    },
-    {
-      label: "nowe koperty GTK",
-      value: gtkCountryValue,
-      detail: gtkCountryDetail,
-      href: "/mapa?widok=gtk-kraj"
-    },
-    {
-      label: "potwierdzone",
-      value: confirmedUserSpots,
-      detail: "lokalne szkice GTK po 5 potwierdzeniach"
-    },
-    {
-      label: "do sprawdzenia",
-      value: userSpotsToVerify,
-      detail: "lokalne szkice GTK czekające na społeczność"
-    }
-  ];
+  {
+    label: "Koperty w bazie",
+    value: totalKopertyInVisibleArea,
+    detail: `${osmExactKoperty} dokładnych z OSM + ${userSpots.length} GTK w aktualnym widoku`
+  },
+  {
+    label: "Odsłony strony",
+    value: pageViewsValue,
+    detail: pageViewsDetail
+  },
+  {
+    label: "Odwiedzający",
+    value: visitorsValue,
+    detail: visitorsDetail
+  },
+  {
+    label: "Kraje",
+    value: countriesValue,
+    detail: countriesDetail
+  }
+];
 
   return (
     <>
       <StatsCards items={stats} />
-
-      <Link
-        href="/mapa?widok=gtk-kraj"
-        className="dashboard-ai-candidates-card"
-        aria-label={`Kandydaci AI GTK: ${aiCandidatesValue}. ${aiCandidatesDetail}`}
-      >
-        <div className="dashboard-ai-candidates-main">
-          <span className="dashboard-ai-candidates-badge">AI</span>
-
-          <div>
-            <p className="eyebrow">kandydaci AI</p>
-            <h2>Kandydaci AI GTK</h2>
-            <p>
-              Crawler wykrył potencjalne koperty na ortofotomapie. Kliknij, aby
-              zobaczyć je na mapie i zweryfikować przed wysłaniem do OSM.
-            </p>
-          </div>
-        </div>
-
-        <div className="dashboard-ai-candidates-counter">
-          <strong>{aiCandidatesValue}</strong>
-          <span>{aiCandidatesDetail}</span>
-        </div>
-      </Link>
 
       <section className="dashboard-map-wide">
         <div className="panel panel-large dashboard-map-panel">
@@ -353,7 +238,6 @@ export function DashboardHome() {
               P: {osmParkingWithDisabledCapacity}
             </span>
             <span className="map-status-pill">GTK lokalnie: {userSpots.length}</span>
-            <span className="map-status-pill">AI GTK: {aiCandidates.length}</span>
           </div>
         </div>
 
