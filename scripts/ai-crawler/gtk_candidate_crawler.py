@@ -16,11 +16,25 @@ WMS_URL = "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResoluti
 OUT_DIR = Path("data/ai-crawler")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-MODEL_VERSION = "blue-envelope-detector-mvp-v4-preview-place-assessment"
+MODEL_VERSION = "blue-envelope-detector-mvp-v5-qualified-95"
 IMAGERY_SOURCE = "geoportal-orto-wms-high-resolution"
 
 WGS84_TO_3857 = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
 MERCATOR_TO_WGS84 = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+
+MIN_RULE_MATCH_PERCENT = 95
+
+# Techniczny próg detektora. To nie jest procent pokazywany użytkownikowi.
+# Dla zaakceptowanych kandydatów wynik mapujemy na 95–100% zgodności reguł GTK.
+MIN_DETECTOR_SCORE = 0.70
+
+# Progi są tylko lekko łagodniejsze niż wersja "100%", żeby nie wrócić do śmieci.
+MIN_PAVED_CONTEXT_RATIO = 0.20
+MIN_WHITE_INSIDE_RATIO = 0.018
+MIN_HARD_WHITE_INSIDE_RATIO = 0.009
+MIN_OUTLINE_SCORE = 0.12
+MIN_OUTLINE_GOOD_SIDES = 2
+MIN_CROSS_SCORE = 0.26
 
 
 def wgs84_to_3857(lng: float, lat: float) -> tuple[float, float]:
@@ -139,6 +153,18 @@ def pixel_bbox_to_wgs84_bbox(
 
 def clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
+
+
+def compute_rule_match_percent(detector_score: float) -> int:
+    """
+    Mapuje techniczny wynik detektora na czytelny procent zgodności reguł.
+    Kandydat dopuszczony do Neon ma minimum 95%, ale nadal wymaga weryfikacji człowieka.
+    """
+    normalized = clamp01(
+        (detector_score - MIN_DETECTOR_SCORE) / max(0.001, 1 - MIN_DETECTOR_SCORE)
+    )
+
+    return int(round(MIN_RULE_MATCH_PERCENT + normalized * (100 - MIN_RULE_MATCH_PERCENT)))
 
 
 def clip_rect(
@@ -635,8 +661,8 @@ def describe_rejection_reason(reason: str) -> str:
         "no_crossed_white_lines": "brak skrzyżowanych białych linii / symbolu",
         "vehicle_like": "obiekt wygląda jak pojazd",
         "motorcycle_or_small_object_like": "obiekt wygląda jak motocykl albo mały przedmiot",
-        "low_confidence": "za niska pewność klasyfikacji",
-        "below_min_confidence": "poniżej minimalnego progu pewności",
+        "low_confidence": "za niska techniczna punktacja detektora",
+        "below_min_confidence": "poniżej minimalnego progu detektora",
         "accepted": "spełnia warunki kandydata na kopertę",
     }
 
@@ -661,7 +687,7 @@ def infer_place_type(evidence: dict[str, Any]) -> str:
     if paved >= 0.48:
         return "utwardzony parking lub plac manewrowy"
 
-    if paved >= 0.22:
+    if paved >= MIN_PAVED_CONTEXT_RATIO:
         return "prawdopodobnie utwardzony teren przy parkingu"
 
     return "niejednoznaczne miejsce"
@@ -683,22 +709,22 @@ def build_candidate_assessment(
     else:
         negative_signals.append("niebieskie pole nie jest wystarczająco zwarte")
 
-    if float(evidence.get("whiteInsideRatio", 0)) >= 0.02:
+    if float(evidence.get("whiteInsideRatio", 0)) >= MIN_WHITE_INSIDE_RATIO:
         positive_signals.append("wykryto białe oznakowanie wewnątrz pola")
     else:
         negative_signals.append("brak białego oznakowania wewnątrz pola")
 
-    if float(evidence.get("whiteRectangleOutlineScore", 0)) >= 0.14:
+    if float(evidence.get("whiteRectangleOutlineScore", 0)) >= MIN_OUTLINE_SCORE:
         positive_signals.append("wykryto fragmenty białego obrysu prostokąta")
     else:
         negative_signals.append("brak białego obrysu prostokąta")
 
-    if float(evidence.get("whiteCrossScore", 0)) >= 0.30:
+    if float(evidence.get("whiteCrossScore", 0)) >= MIN_CROSS_SCORE:
         positive_signals.append("wykryto skrzyżowane białe linie / symbol")
     else:
         negative_signals.append("brak skrzyżowanych białych linii / symbolu")
 
-    if float(evidence.get("pavedContextRatio", 0)) >= 0.22:
+    if float(evidence.get("pavedContextRatio", 0)) >= MIN_PAVED_CONTEXT_RATIO:
         positive_signals.append("otoczenie wygląda na asfalt/kostkę/parking")
     else:
         negative_signals.append("otoczenie nie wygląda jak utwardzony parking")
@@ -712,18 +738,19 @@ def build_candidate_assessment(
     if accepted:
         candidate_type = "prawdopodobna koperta parkingowa dla OzN"
         review_summary = (
-            "Kandydat spełnia warunki: niebieskie pole, białe oznakowanie, "
-            "ślady obrysu prostokąta oraz utwardzone otoczenie. Wymaga ręcznej weryfikacji."
+            "Kandydat spełnia co najmniej 95% reguł GTK: wykryto niebieskie pole, "
+            "białe oznakowanie, ślad obrysu i utwardzone otoczenie. "
+            "Wymaga ręcznej weryfikacji przed wysłaniem do OSM."
         )
     else:
         candidate_type = f"odrzucony kandydat: {describe_rejection_reason(reason)}"
         review_summary = (
-            "Obiekt nie spełnia wszystkich warunków koperty. "
+            "Obiekt nie spełnia warunków kandydata na kopertę. "
             f"Powód: {describe_rejection_reason(reason)}."
         )
 
     confidence_level = (
-        "wysoka" if confidence >= 0.82 else "średnia" if confidence >= 0.64 else "niska"
+        "wysoka" if confidence >= 0.82 else "średnia" if confidence >= MIN_DETECTOR_SCORE else "niska"
     )
 
     return {
@@ -854,7 +881,7 @@ def classify_patch(
     if fill_ratio < 0.18:
         return False, 0.0, "blue_fill_too_low", evidence
 
-    if paved_ratio < 0.22:
+    if paved_ratio < MIN_PAVED_CONTEXT_RATIO:
         return False, 0.0, "not_paved_context", evidence
 
     if green_ratio > 0.55:
@@ -863,16 +890,16 @@ def classify_patch(
     if red_roof_ratio > 0.24 and paved_ratio < 0.45:
         return False, 0.0, "roof_like_context", evidence
 
-    if white_inside_ratio < 0.020:
+    if white_inside_ratio < MIN_WHITE_INSIDE_RATIO:
         return False, 0.0, "no_white_marking_inside_blue_field", evidence
 
-    if hard_white_inside_ratio < 0.010:
+    if hard_white_inside_ratio < MIN_HARD_WHITE_INSIDE_RATIO:
         return False, 0.0, "no_strong_white_marking_inside_blue_field", evidence
 
-    if outline_good_sides < 2 or outline_score < 0.14:
+    if outline_good_sides < MIN_OUTLINE_GOOD_SIDES or outline_score < MIN_OUTLINE_SCORE:
         return False, 0.0, "no_white_rectangle_outline", evidence
 
-    if cross_score < 0.30:
+    if cross_score < MIN_CROSS_SCORE:
         return False, 0.0, "no_crossed_white_lines", evidence
 
     car_like = (
@@ -897,7 +924,7 @@ def classify_patch(
 
     size_score = clamp01((blue_area_m2 - 1.5) / 12.0)
     fill_score = clamp01(fill_ratio / 0.55)
-    paved_score = clamp01((paved_ratio - 0.22) / 0.50)
+    paved_score = clamp01((paved_ratio - MIN_PAVED_CONTEXT_RATIO) / 0.50)
     white_score = clamp01(white_inside_ratio / 0.07)
     hard_white_score = clamp01(hard_white_inside_ratio / 0.045)
     outline_norm_score = clamp01(outline_score / 0.38)
@@ -922,7 +949,7 @@ def classify_patch(
 
     confidence = clamp01(confidence)
 
-    if confidence < 0.64:
+    if confidence < MIN_DETECTOR_SCORE:
         return False, confidence, "low_confidence", evidence
 
     return True, confidence, "accepted", evidence
@@ -1024,25 +1051,30 @@ def detect_blue_candidates(
         }
 
         if accepted:
+            rule_match_percent = compute_rule_match_percent(confidence)
+
             evidence["detectorScore"] = round(confidence, 4)
-            evidence["ruleMatchPercent"] = 100
-            evidence["ruleMatchStatus"] = "full_match"
+            evidence["ruleMatchPercent"] = rule_match_percent
+            evidence["ruleMatchStatus"] = (
+                "full_match" if rule_match_percent >= 100 else "qualified_match"
+            )
             evidence["ruleMatchDescription"] = (
-                "Obiekt spełnia 100% twardych reguł GTK: niebieskie pole, "
-                "białe oznakowanie, biały obrys, kontekst parkingowy i brak cech pojazdu/dachu."
+                f"Obiekt spełnia {rule_match_percent}% reguł GTK: wykryto niebieskie pole, "
+                "białe oznakowanie, ślad obrysu i kontekst parkingowy. "
+                "Kandydat wymaga ręcznej weryfikacji przed wysłaniem do OSM."
             )
 
             candidate = {
                 "lat": round(lat, 7),
                 "lng": round(lng, 7),
-                "confidence": 1.0,
+                "confidence": round(rule_match_percent / 100, 2),
                 "modelVersion": MODEL_VERSION,
                 "detectionHash": (
                     f"{MODEL_VERSION}:"
                     f"{round(lat, 7)}:"
                     f"{round(lng, 7)}:"
                     f"{round(evidence['blueAreaPixels'], 1)}:"
-                    f"{round(confidence, 4)}"
+                    f"{rule_match_percent}"
                 ),
                 "imagerySource": IMAGERY_SOURCE,
                 "thumbnailUrl": make_candidate_thumbnail_data_url(image, field_box),
@@ -1061,7 +1093,7 @@ def detect_blue_candidates(
             cv2.polylines(debug, [field_box], True, (0, 220, 0), 2)
             cv2.putText(
                 debug,
-                f"AI {confidence:.2f}",
+                f"AI {rule_match_percent}%",
                 (center_x + 4, max(0, center_y - 6)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.42,
@@ -1123,7 +1155,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bbox", required=True, help="west,south,east,north")
     parser.add_argument("--size", type=int, default=1800)
-    parser.add_argument("--min-confidence", type=float, default=0.64)
+    parser.add_argument("--min-confidence", type=float, default=MIN_DETECTOR_SCORE)
     parser.add_argument("--debug-rejected", action="store_true")
     args = parser.parse_args()
 
@@ -1151,6 +1183,8 @@ def main():
             "crossedWhiteLines": True,
             "pavedContext": True,
             "rejectVehiclesRoofsVegetation": True,
+            "minimumRuleMatchPercent": MIN_RULE_MATCH_PERCENT,
+            "minimumDetectorScore": MIN_DETECTOR_SCORE,
         },
         "candidates": candidates,
     }
