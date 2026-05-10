@@ -117,6 +117,10 @@ export type RouteMapOverlay = {
       };
     }>;
   } | null;
+  routeCoordinates?: Array<{
+    lat: number;
+    lng: number;
+  }> | null;
   destination?: {
     name?: string;
     lat: number;
@@ -877,25 +881,43 @@ export function KopertyMap({
     const layer = L.layerGroup();
     const boundsPoints: Array<[number, number]> = [];
 
+    const normalizedRouteCoordinates = Array.isArray(overlay.routeCoordinates)
+    ? overlay.routeCoordinates
+    : [];
+
     const routeFeature = overlay.route?.features?.[0];
-    const routeCoordinates =
+    const rawRouteCoordinates =
       routeFeature?.geometry?.type === "LineString" &&
       Array.isArray(routeFeature.geometry.coordinates)
         ? routeFeature.geometry.coordinates
         : [];
 
-    const routeLatLngs = routeCoordinates
-      .map((coordinate) => {
-        const lng = Number(coordinate[0]);
-        const lat = Number(coordinate[1]);
+    const routeLatLngs =
+      normalizedRouteCoordinates.length > 0
+        ? normalizedRouteCoordinates
+            .map((coordinate) => {
+              const lat = Number(coordinate.lat);
+              const lng = Number(coordinate.lng);
 
-        if (!hasValidCoordinates(lat, lng)) {
-          return null;
-        }
+              if (!hasValidCoordinates(lat, lng)) {
+                return null;
+              }
 
-        return [lat, lng] as [number, number];
-      })
-      .filter((point): point is [number, number] => Boolean(point));
+              return [lat, lng] as [number, number];
+            })
+            .filter((point): point is [number, number] => Boolean(point))
+        : rawRouteCoordinates
+            .map((coordinate) => {
+              const lng = Number(coordinate[0]);
+              const lat = Number(coordinate[1]);
+
+              if (!hasValidCoordinates(lat, lng)) {
+                return null;
+              }
+
+              return [lat, lng] as [number, number];
+            })
+            .filter((point): point is [number, number] => Boolean(point));
 
     if (
       overlay.currentPosition &&

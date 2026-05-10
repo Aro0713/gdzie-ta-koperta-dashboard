@@ -22,6 +22,7 @@ type RouteAssistantResponse = {
   recommendedSpot?: OsmParkingFeature | null;
   alternatives?: OsmParkingFeature[];
   route?: RouteMapOverlay["route"];
+  routeCoordinates?: RouteMapOverlay["routeCoordinates"];
   routeSummary?: {
     distanceMeters: number | null;
     durationSeconds: number | null;
@@ -85,7 +86,39 @@ function formatNavigationDistance(value: number | null) {
   return `${Math.round(meters)} m`;
 }
 
-function routeCoordinatesToLatLngs(route?: RouteMapOverlay["route"]) {
+function isValidLatLng(lat: number, lng: number) {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  );
+}
+
+function routeCoordinatesToLatLngs(
+  route?: RouteMapOverlay["route"],
+  routeCoordinates?: RouteMapOverlay["routeCoordinates"]
+) {
+  if (Array.isArray(routeCoordinates) && routeCoordinates.length > 0) {
+    return routeCoordinates
+      .map((coordinate) => {
+        const lat = Number(coordinate.lat);
+        const lng = Number(coordinate.lng);
+
+        if (!isValidLatLng(lat, lng)) {
+          return null;
+        }
+
+        return {
+          lat,
+          lng
+        };
+      })
+      .filter((point): point is { lat: number; lng: number } => Boolean(point));
+  }
+
   const coordinates = route?.features?.[0]?.geometry?.coordinates;
 
   if (!Array.isArray(coordinates)) {
@@ -97,14 +130,7 @@ function routeCoordinatesToLatLngs(route?: RouteMapOverlay["route"]) {
       const lng = Number(coordinate[0]);
       const lat = Number(coordinate[1]);
 
-      if (
-        !Number.isFinite(lat) ||
-        !Number.isFinite(lng) ||
-        lat < -90 ||
-        lat > 90 ||
-        lng < -180 ||
-        lng > 180
-      ) {
+      if (!isValidLatLng(lat, lng)) {
         return null;
       }
 
@@ -169,9 +195,10 @@ function distancePointToSegmentMeters(
 
 function distanceToRouteMeters(
   position: { lat: number; lng: number },
-  route?: RouteMapOverlay["route"]
+  route?: RouteMapOverlay["route"],
+  routeCoordinates?: RouteMapOverlay["routeCoordinates"]
 ) {
-  const points = routeCoordinatesToLatLngs(route);
+  const points = routeCoordinatesToLatLngs(route, routeCoordinates);
 
   if (points.length < 2) {
     return null;
@@ -199,7 +226,7 @@ function getFeatureLatLng(feature?: OsmParkingFeature | null) {
   const lng = Number(coordinates[0]);
   const lat = Number(coordinates[1]);
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+  if (!isValidLatLng(lat, lng)) {
     return null;
   }
 
@@ -303,9 +330,11 @@ export default function MapaPage() {
     const remainingMeters = target
       ? distanceMeters(currentPosition, target)
       : null;
+
     const routeDistanceMeters = distanceToRouteMeters(
       currentPosition,
-      assistantResult.route
+      assistantResult.route,
+      assistantResult.routeCoordinates
     );
 
     let status: NavigationStatus = "on_route";
@@ -333,6 +362,7 @@ export default function MapaPage() {
 
     setRouteOverlay({
       route: assistantResult.route || null,
+      routeCoordinates: assistantResult.routeCoordinates || null,
       destination: assistantResult.destination || null,
       recommendedSpot: assistantResult.recommendedSpot || null,
       currentPosition,
@@ -357,6 +387,7 @@ export default function MapaPage() {
     if (assistantResult) {
       setRouteOverlay({
         route: assistantResult.route || null,
+        routeCoordinates: assistantResult.routeCoordinates || null,
         destination: assistantResult.destination || null,
         recommendedSpot: assistantResult.recommendedSpot || null,
         fitMode: "route"
@@ -453,6 +484,7 @@ export default function MapaPage() {
       setAssistantResult(data);
       setRouteOverlay({
         route: data.route || null,
+        routeCoordinates: data.routeCoordinates || null,
         destination: data.destination || null,
         recommendedSpot: data.recommendedSpot || null,
         fitMode: "route"
@@ -552,24 +584,6 @@ export default function MapaPage() {
 
               <p>{assistantResult.answer}</p>
 
-              {assistantResult.destination ? (
-                <div className="route-assistant-block">
-                  <span>Cel</span>
-                  <strong>{assistantResult.destination.name}</strong>
-                </div>
-              ) : null}
-
-              {assistantResult.routeSummary ? (
-                <div className="route-assistant-meta">
-                  <span>
-                    Trasa: {assistantResult.routeSummary.distanceLabel}
-                  </span>
-                  <span>
-                    Czas: {assistantResult.routeSummary.durationLabel}
-                  </span>
-                </div>
-              ) : null}
-
               <div className="route-navigation-panel">
                 <strong>Prowadzenie do koperty</strong>
                 <p>{navigationState.message}</p>
@@ -618,6 +632,24 @@ export default function MapaPage() {
                   ) : null}
                 </div>
               </div>
+
+              {assistantResult.destination ? (
+                <div className="route-assistant-block">
+                  <span>Cel</span>
+                  <strong>{assistantResult.destination.name}</strong>
+                </div>
+              ) : null}
+
+              {assistantResult.routeSummary ? (
+                <div className="route-assistant-meta">
+                  <span>
+                    Trasa: {assistantResult.routeSummary.distanceLabel}
+                  </span>
+                  <span>
+                    Czas: {assistantResult.routeSummary.durationLabel}
+                  </span>
+                </div>
+              ) : null}
 
               {recommendedProperties ? (
                 <article className="osm-side-card route-assistant-spot-card">

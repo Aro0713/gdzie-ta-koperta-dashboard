@@ -400,6 +400,33 @@ async function getOsmParkingNearDestination(origin: string, lat: number, lng: nu
 
   return data as OsmParkingResponse;
 }
+function extractRouteCoordinates(route: OrsFeatureCollection) {
+  const coordinates = route.features?.[0]?.geometry?.coordinates;
+
+  if (!Array.isArray(coordinates)) {
+    return [];
+  }
+
+  return coordinates
+    .map((coordinate) => {
+      const lng = Number(coordinate[0]);
+      const lat = Number(coordinate[1]);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return null;
+      }
+
+      if (!isValidLatLng(lat, lng)) {
+        return null;
+      }
+
+      return {
+        lat,
+        lng
+      };
+    })
+    .filter((point): point is { lat: number; lng: number } => Boolean(point));
+}
 
 export async function POST(request: NextRequest) {
   let body: RouteAssistantBody;
@@ -489,8 +516,9 @@ export async function POST(request: NextRequest) {
           return feature.properties?.osmId !== recommendedSpot.properties?.osmId;
         })
         .slice(0, 5),
-      route,
-      routeSummary: {
+        route,
+        routeCoordinates: extractRouteCoordinates(route),
+        routeSummary: {
         distanceMeters: routeSummary?.distance ?? null,
         durationSeconds: routeSummary?.duration ?? null,
         distanceLabel: formatMeters(routeSummary?.distance),
