@@ -25,6 +25,8 @@ type SendToOsmResponse = {
   nodeId: string;
   changesetId: string;
   osmUrl: string;
+  registrySaved: boolean;
+  registryError: string | null;
 };
 
 const ALLOWED_OBJECT_TAGS = new Set([
@@ -158,6 +160,67 @@ ${tagXml}
 </osm>`;
 }
 
+async function registerAiSubmissionInGtk(params: {
+  candidateId: string;
+  osmUserId?: number | null;
+  osmDisplayName?: string | null;
+  nodeId: string;
+  changesetId: string;
+  osmUrl: string;
+  lat: number;
+  lng: number;
+  tags: Record<string, string>;
+}) {
+  await sql`
+    INSERT INTO gtk_osm_submissions (
+      source_type,
+      ai_candidate_id,
+      submitted_by_osm_id,
+      submitted_by_name,
+      osm_type,
+      osm_id,
+      osm_changeset_id,
+      osm_url,
+      lat,
+      lng,
+      status,
+      metadata
+    )
+    VALUES (
+      'ai_candidate',
+      ${params.candidateId},
+      ${params.osmUserId || null},
+      ${params.osmDisplayName || null},
+      'node',
+      ${Number(params.nodeId)},
+      ${Number(params.changesetId)},
+      ${params.osmUrl},
+      ${params.lat},
+      ${params.lng},
+      'submitted_to_osm',
+      ${JSON.stringify({
+        source: "ai_candidate",
+        app: "GdzieTaKoperta",
+        aiCandidateId: params.candidateId,
+        osmTags: params.tags
+      })}::jsonb
+    )
+    ON CONFLICT (osm_type, osm_id)
+    DO UPDATE SET
+      source_type = EXCLUDED.source_type,
+      ai_candidate_id = COALESCE(gtk_osm_submissions.ai_candidate_id, EXCLUDED.ai_candidate_id),
+      submitted_by_osm_id = COALESCE(gtk_osm_submissions.submitted_by_osm_id, EXCLUDED.submitted_by_osm_id),
+      submitted_by_name = COALESCE(gtk_osm_submissions.submitted_by_name, EXCLUDED.submitted_by_name),
+      osm_changeset_id = EXCLUDED.osm_changeset_id,
+      osm_url = EXCLUDED.osm_url,
+      lat = EXCLUDED.lat,
+      lng = EXCLUDED.lng,
+      status = EXCLUDED.status,
+      metadata = gtk_osm_submissions.metadata || EXCLUDED.metadata,
+      updated_at = now()
+  `;
+}
+
 export async function POST(
   _request: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -262,6 +325,34 @@ export async function POST(
       WHERE id = ${candidate.id}
     `;
 
+    let registrySaved = true;
+    let registryError: string | null = null;
+
+    try {
+      await registerAiSubmissionInGtk({
+        candidateId: candidate.id,
+        osmUserId: session?.user?.id || null,
+        osmDisplayName: session?.user?.displayName || null,
+        nodeId,
+        changesetId,
+        osmUrl,
+        lat: candidate.lat,
+        lng: candidate.lng,
+        tags
+      });
+    } catch (error) {
+      registrySaved = false;
+      registryError =
+        error instanceof Error ? error.message : "Unknown GTK registry error";
+
+      console.error("[api/ai-candidates/submit-osm] Failed to register GTK submission", {
+        candidateId: candidate.id,
+        nodeId,
+        changesetId,
+        registryError
+      });
+    }
+
     await sql`
       INSERT INTO gtk_ai_candidate_events (
         candidate_id,
@@ -285,7 +376,9 @@ export async function POST(
           nodeId,
           changesetId,
           osmUrl,
-          tags
+          tags,
+          registrySaved,
+          registryError
         })}::jsonb
       )
     `;
@@ -295,7 +388,9 @@ export async function POST(
       id: candidate.id,
       nodeId,
       changesetId,
-      osmUrl
+      osmUrl,
+      registrySaved,
+      registryError
     };
 
     return NextResponse.json(payload);

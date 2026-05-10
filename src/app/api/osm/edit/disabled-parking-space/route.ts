@@ -1,5 +1,6 @@
 ﻿import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { sql } from "@/lib/db";
 import {
   OSM_SESSION_COOKIE,
   decryptSession,
@@ -110,6 +111,64 @@ function buildNodeXml(changesetId: string, lat: number, lng: number) {
 </osm>`;
 }
 
+async function registerManualSubmissionInGtk(params: {
+  localSpotId?: string;
+  osmUserId?: number | null;
+  osmDisplayName?: string | null;
+  nodeId: string;
+  changesetId: string;
+  osmUrl: string;
+  lat: number;
+  lng: number;
+}) {
+  await sql`
+    INSERT INTO gtk_osm_submissions (
+      source_type,
+      local_spot_id,
+      submitted_by_osm_id,
+      submitted_by_name,
+      osm_type,
+      osm_id,
+      osm_changeset_id,
+      osm_url,
+      lat,
+      lng,
+      status,
+      metadata
+    )
+    VALUES (
+      'manual',
+      ${params.localSpotId || null},
+      ${params.osmUserId || null},
+      ${params.osmDisplayName || null},
+      'node',
+      ${Number(params.nodeId)},
+      ${Number(params.changesetId)},
+      ${params.osmUrl},
+      ${params.lat},
+      ${params.lng},
+      'submitted_to_osm',
+      ${JSON.stringify({
+        source: "manual_map_add",
+        app: "GdzieTaKoperta"
+      })}::jsonb
+    )
+    ON CONFLICT (osm_type, osm_id)
+    DO UPDATE SET
+      source_type = EXCLUDED.source_type,
+      local_spot_id = COALESCE(gtk_osm_submissions.local_spot_id, EXCLUDED.local_spot_id),
+      submitted_by_osm_id = COALESCE(gtk_osm_submissions.submitted_by_osm_id, EXCLUDED.submitted_by_osm_id),
+      submitted_by_name = COALESCE(gtk_osm_submissions.submitted_by_name, EXCLUDED.submitted_by_name),
+      osm_changeset_id = EXCLUDED.osm_changeset_id,
+      osm_url = EXCLUDED.osm_url,
+      lat = EXCLUDED.lat,
+      lng = EXCLUDED.lng,
+      status = EXCLUDED.status,
+      metadata = gtk_osm_submissions.metadata || EXCLUDED.metadata,
+      updated_at = now()
+  `;
+}
+
 export async function POST(request: NextRequest) {
   const cookieStore = await cookies();
   const rawSession = cookieStore.get(OSM_SESSION_COOKIE)?.value;
@@ -176,12 +235,41 @@ export async function POST(request: NextRequest) {
       }
     );
 
+    const osmUrl = `https://www.openstreetmap.org/node/${nodeId}`;
+    let registrySaved = true;
+    let registryError: string | null = null;
+
+    try {
+      await registerManualSubmissionInGtk({
+        localSpotId: body.localSpotId,
+        osmUserId: session?.user?.id || null,
+        osmDisplayName: session?.user?.displayName || null,
+        nodeId,
+        changesetId,
+        osmUrl,
+        lat,
+        lng
+      });
+    } catch (error) {
+      registrySaved = false;
+      registryError =
+        error instanceof Error ? error.message : "Unknown GTK registry error";
+
+      console.error("[api/osm/edit] Failed to register GTK submission", {
+        nodeId,
+        changesetId,
+        registryError
+      });
+    }
+
     return NextResponse.json({
       ok: true,
       localSpotId: body.localSpotId || null,
       nodeId,
       changesetId,
-      osmUrl: `https://www.openstreetmap.org/node/${nodeId}`,
+      osmUrl,
+      registrySaved,
+      registryError,
       message:
         "Koperta została wysłana do OpenStreetMap jako edycja zalogowanego użytkownika."
     });
