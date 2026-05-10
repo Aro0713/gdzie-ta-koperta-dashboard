@@ -3353,3 +3353,39 @@ textarea {
     filter: drop-shadow(0 0 12px rgba(124, 58, 237, 0.38));
   }
 }
+/* --- GTK: live navigation panel --- */
+
+.route-navigation-panel {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border-radius: 16px;
+  background: rgba(124, 58, 237, 0.08);
+  border: 1px solid rgba(124, 58, 237, 0.16);
+}
+
+.route-navigation-panel > strong {
+  color: #581c87;
+  font-size: 0.82rem;
+  font-weight: 1000;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.route-navigation-panel > p {
+  margin: 0;
+  color: #241134;
+  font-weight: 900;
+  line-height: 1.45;
+}
+
+.route-navigation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.route-navigation-actions .primary-button,
+.route-navigation-actions .mini-button {
+  width: auto;
+}

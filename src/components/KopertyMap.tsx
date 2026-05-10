@@ -123,6 +123,13 @@ export type RouteMapOverlay = {
     lng: number;
   } | null;
   recommendedSpot?: OsmParkingFeature | null;
+  currentPosition?: {
+    lat: number;
+    lng: number;
+    accuracyMeters?: number | null;
+  } | null;
+  routeStatus?: "idle" | "on_route" | "off_route" | "arrived" | null;
+  fitMode?: "route" | "follow" | "none";
 };
 
 type KopertyMapMode = "near-user" | "gtk-country";
@@ -890,17 +897,38 @@ export function KopertyMap({
       })
       .filter((point): point is [number, number] => Boolean(point));
 
-    if (routeLatLngs.length > 1) {
-      const routeLine = L.polyline(routeLatLngs, {
-        color: "#7c3aed",
-        weight: 6,
-        opacity: 0.86,
-        lineCap: "round",
-        lineJoin: "round"
+    if (
+      overlay.currentPosition &&
+      hasValidCoordinates(overlay.currentPosition.lat, overlay.currentPosition.lng)
+    ) {
+      const statusClass = overlay.routeStatus
+        ? ` route-navigation-user-marker-${overlay.routeStatus}`
+        : "";
+
+      const navigationUserIcon = L.divIcon({
+        className: `route-navigation-user-marker${statusClass}`,
+        html: "<span>TY</span>",
+        iconSize: [42, 42],
+        iconAnchor: [21, 21],
+        popupAnchor: [0, -16]
       });
 
-      layer.addLayer(routeLine);
-      boundsPoints.push(...routeLatLngs);
+      const navigationUserMarker = L.marker(
+        [overlay.currentPosition.lat, overlay.currentPosition.lng],
+        {
+          icon: navigationUserIcon,
+          zIndexOffset: 2100
+        }
+      ).bindPopup(
+        `
+          <div class="osm-popup route-popup">
+            <strong>Twoja pozycja</strong>
+            <span>Pozycja aktualizowana podczas prowadzenia do koperty.</span>
+          </div>
+        `
+      );
+
+      layer.addLayer(navigationUserMarker);
     }
 
     if (
@@ -990,13 +1018,24 @@ export function KopertyMap({
     layer.addTo(map);
     routeLayer.current = layer;
 
-    if (boundsPoints.length > 1) {
-      map.fitBounds(L.latLngBounds(boundsPoints), {
-        padding: [42, 42],
-        maxZoom: 17
-      });
-    } else if (boundsPoints.length === 1) {
-      map.setView(boundsPoints[0], 17);
+    if (
+      overlay.fitMode === "follow" &&
+      overlay.currentPosition &&
+      hasValidCoordinates(overlay.currentPosition.lat, overlay.currentPosition.lng)
+    ) {
+      map.setView(
+        [overlay.currentPosition.lat, overlay.currentPosition.lng],
+        Math.max(map.getZoom(), 16)
+      );
+    } else if (overlay.fitMode !== "none") {
+      if (boundsPoints.length > 1) {
+        map.fitBounds(L.latLngBounds(boundsPoints), {
+          padding: [42, 42],
+          maxZoom: 17
+        });
+      } else if (boundsPoints.length === 1) {
+        map.setView(boundsPoints[0], 17);
+      }
     }
 
     keepUserLocationVisible();
