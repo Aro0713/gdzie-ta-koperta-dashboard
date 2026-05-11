@@ -508,9 +508,10 @@ export default function MapaPage() {
 
       <section className="navigation-map-section" aria-label="Mapa nawigacji">
         <div className="navigation-map-card">
-          <KopertyMap
+        <KopertyMap
             full
             routeOverlay={routeOverlay}
+            hideStatusChips
             navigationControl={
               navigationState.active
                 ? {
@@ -577,12 +578,24 @@ export default function MapaPage() {
                     </strong>
                   </div>
 
-                  {assistantResult.routeSummary ? (
-                    <div className="route-assistant-mapbar-summary">
-                      <span>{assistantResult.routeSummary.durationLabel}</span>
-                      <strong>{assistantResult.routeSummary.distanceLabel}</strong>
-                    </div>
-                  ) : null}
+                  <div className="route-assistant-mapbar-result-actions">
+                    {assistantResult.routeSummary ? (
+                      <div className="route-assistant-mapbar-summary">
+                        <span>{assistantResult.routeSummary.durationLabel}</span>
+                        <strong>{assistantResult.routeSummary.distanceLabel}</strong>
+                      </div>
+                    ) : null}
+
+                    {navigationState.active ? (
+                      <button
+                        type="button"
+                        className="route-assistant-mapbar-collapse"
+                        onClick={() => setAssistantPanelCollapsed(true)}
+                      >
+                        Zwiń
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
 
                 {assistantResult.answer ? (

@@ -3736,3 +3736,39 @@ textarea {
     white-space: nowrap;
   }
 }
+/* --- GTK: navigation mapbar collapse action --- */
+
+.route-assistant-mapbar-result-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.route-assistant-mapbar-collapse {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  color: #581c87;
+  background: rgba(124, 58, 237, 0.12);
+  font-size: 0.78rem;
+  font-weight: 1000;
+  white-space: nowrap;
+}
+
+.route-assistant-mapbar-collapse:hover {
+  color: white;
+  background: #7c3aed;
+}
+
+@media (max-width: 860px) {
+  .route-assistant-mapbar-result-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .route-assistant-mapbar-collapse {
+    width: 100%;
+  }
+}

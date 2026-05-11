@@ -151,6 +151,7 @@ type KopertyMapProps = {
   mode?: KopertyMapMode;
   routeOverlay?: RouteMapOverlay | null;
   navigationControl?: NavigationToolbarControl | null;
+  hideStatusChips?: boolean;
   onOsmData?: (data: OsmParkingResponse) => void;
   onUserSpotsChange?: (spots: UserAddedSpot[]) => void;
 };
@@ -490,6 +491,7 @@ export function KopertyMap({
   mode = "near-user",
   routeOverlay = null,
   navigationControl = null,
+  hideStatusChips = false,
   onOsmData,
   onUserSpotsChange
 }: KopertyMapProps) {
@@ -2052,24 +2054,26 @@ export function KopertyMap({
               </div>
             )}
 
-            <div className="map-toolbar-chips map-toolbar-chips-compact">
-              {isGtkCountryMode ? (
-                <>
-                  <span className="map-status-pill">♿ GTK: {exactOsmCount}</span>
-                  <span className="map-status-pill">AI GTK: {aiCandidates.length}</span>
-                  <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
-                  <span className="map-status-pill">Razem: {osmCount}</span>
-                </>
-              ) : (
-                <>
-                  <span className="map-status-pill">♿ OSM: {exactOsmCount}</span>
-                  <span className="map-status-pill">P: {parkingOsmCount}</span>
-                  <span className="map-status-pill">AI GTK: {aiCandidates.length}</span>
-                  <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
-                  <span className="map-status-pill">Razem: {osmCount}</span>
-                </>
-              )}
-            </div>
+             {!hideStatusChips ? (
+                <div className="map-toolbar-chips map-toolbar-chips-compact">
+                  {isGtkCountryMode ? (
+                    <>
+                      <span className="map-status-pill">♿ GTK: {exactOsmCount}</span>
+                      <span className="map-status-pill">AI GTK: {aiCandidates.length}</span>
+                      <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
+                      <span className="map-status-pill">Razem: {osmCount}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="map-status-pill">♿ OSM: {exactOsmCount}</span>
+                      <span className="map-status-pill">P: {parkingOsmCount}</span>
+                      <span className="map-status-pill">AI GTK: {aiCandidates.length}</span>
+                      <span className="map-status-pill">Moje: {userAddedSpots.length}</span>
+                      <span className="map-status-pill">Razem: {osmCount}</span>
+                    </>
+                  )}
+                </div>
+              ) : null}
           </div>
         </div>
 
