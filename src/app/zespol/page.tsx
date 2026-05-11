@@ -105,8 +105,8 @@ export default function ZespolPage() {
           </p>
         </div>
 
-        <Link className="primary-button" href="/mapa">
-          Otwórz mapę
+        <Link href="/mapa" className="primary-button">
+          Nawigacja
         </Link>
       </section>
     </main>

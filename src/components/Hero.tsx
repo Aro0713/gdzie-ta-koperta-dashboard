@@ -15,9 +15,9 @@ export function Hero() {
         <p className="mission-line">{appConfig.mission}</p>
 
         <div className="hero-actions">
-          <Link className="primary-button" href="/mapa">
-            Otwórz mapę
-          </Link>
+          <Link href="/mapa" className="primary-button">
+          Nawigacja
+        </Link>
         </div>
       </div>
 
