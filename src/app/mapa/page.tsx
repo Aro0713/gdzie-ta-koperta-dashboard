@@ -242,6 +242,7 @@ export default function MapaPage() {
   const [routeOverlay, setRouteOverlay] = useState<RouteMapOverlay | null>(null);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantError, setAssistantError] = useState<string | null>(null);
+  const [assistantPanelCollapsed, setAssistantPanelCollapsed] = useState(false);
   const [navigationState, setNavigationState] = useState<NavigationState>({
     active: false,
     status: "idle",
@@ -368,6 +369,7 @@ export default function MapaPage() {
       status: "idle",
       message: "Nawigacja została zatrzymana."
     }));
+    setAssistantPanelCollapsed(false);
 
     if (assistantResult) {
       setRouteOverlay({
@@ -406,6 +408,7 @@ export default function MapaPage() {
     try {
       const firstPosition = await getCurrentPosition();
       updateNavigationFromPosition(firstPosition);
+      setAssistantPanelCollapsed(true);
 
       navigationWatchId.current = navigator.geolocation.watchPosition(
         updateNavigationFromPosition,
@@ -439,6 +442,7 @@ export default function MapaPage() {
     }
 
     stopNavigation();
+    setAssistantPanelCollapsed(false);
 
     setAssistantLoading(true);
     setAssistantError(null);
@@ -504,13 +508,29 @@ export default function MapaPage() {
 
       <section className="navigation-map-section" aria-label="Mapa nawigacji">
         <div className="navigation-map-card">
-          <KopertyMap full routeOverlay={routeOverlay} />
+          <KopertyMap
+            full
+            routeOverlay={routeOverlay}
+            navigationControl={
+              navigationState.active
+                ? {
+                    active: true,
+                    remainingLabel: formatNavigationDistance(
+                      navigationState.remainingMeters
+                    ),
+                    statusLabel: navigationState.message,
+                    onOpen: () => setAssistantPanelCollapsed(false),
+                    onStop: stopNavigation
+                  }
+                : null
+            }
+          />
 
-          <div
-            className={`route-assistant-mapbar ${
-              assistantResult ? "route-assistant-mapbar-expanded" : ""
-            }`}
-          >
+           <div
+              className={`route-assistant-mapbar ${
+                assistantResult ? "route-assistant-mapbar-expanded" : ""
+              } ${assistantPanelCollapsed ? "route-assistant-mapbar-collapsed" : ""}`}
+            >
             <form
               className="route-assistant-mapbar-form"
               onSubmit={(event) => {
@@ -594,7 +614,7 @@ export default function MapaPage() {
                         onClick={() => void startNavigation()}
                         disabled={!assistantResult.recommendedSpot}
                       >
-                        Start dojazdu
+                        Nawiguj
                       </button>
                     ) : (
                       <button

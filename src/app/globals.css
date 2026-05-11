@@ -3701,3 +3701,38 @@ textarea {
     width: 100%;
   }
 }
+/* --- GTK: compact navigation controls in map toolbar --- */
+
+.route-assistant-mapbar-collapsed {
+  display: none;
+}
+
+.map-btn-route-navigation {
+  color: #ffffff;
+  background: linear-gradient(135deg, #7c3aed, #1477d4);
+  box-shadow: 0 10px 24px rgba(124, 58, 237, 0.22);
+}
+
+.map-btn-route-navigation:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(124, 58, 237, 0.28);
+}
+
+.map-btn-route-stop {
+  color: #7f1d1d;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.map-btn-route-stop:hover {
+  color: #ffffff;
+  background: #dc2626;
+}
+
+@media (max-width: 860px) {
+  .map-btn-route-navigation {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

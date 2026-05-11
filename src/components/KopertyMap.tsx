@@ -138,10 +138,19 @@ export type RouteMapOverlay = {
 
 type KopertyMapMode = "near-user" | "gtk-country";
 
+type NavigationToolbarControl = {
+  active: boolean;
+  remainingLabel?: string;
+  statusLabel?: string;
+  onOpen?: () => void;
+  onStop?: () => void;
+};
+
 type KopertyMapProps = {
   full?: boolean;
   mode?: KopertyMapMode;
   routeOverlay?: RouteMapOverlay | null;
+  navigationControl?: NavigationToolbarControl | null;
   onOsmData?: (data: OsmParkingResponse) => void;
   onUserSpotsChange?: (spots: UserAddedSpot[]) => void;
 };
@@ -480,6 +489,7 @@ export function KopertyMap({
   full = false,
   mode = "near-user",
   routeOverlay = null,
+  navigationControl = null,
   onOsmData,
   onUserSpotsChange
 }: KopertyMapProps) {
@@ -1979,6 +1989,29 @@ export function KopertyMap({
               >
                 {showRemoveChooser ? "Anuluj" : "Usuń"}
               </button>
+            ) : null}
+            {navigationControl?.active ? (
+              <>
+                <button
+                  className="map-btn map-btn-route-navigation"
+                  onClick={navigationControl.onOpen}
+                  type="button"
+                  title={navigationControl.statusLabel || "Pokaż panel nawigacji"}
+                >
+                  {navigationControl.remainingLabel
+                    ? `Nawigacja · ${navigationControl.remainingLabel}`
+                    : "Nawigacja"}
+                </button>
+
+                <button
+                  className="map-btn map-btn-route-stop"
+                  onClick={navigationControl.onStop}
+                  type="button"
+                  title="Zatrzymaj nawigację"
+                >
+                  Stop
+                </button>
+              </>
             ) : null}
           </div>
 
