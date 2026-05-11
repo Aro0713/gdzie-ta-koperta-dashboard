@@ -143,6 +143,7 @@ type NavigationToolbarControl = {
   active: boolean;
   remainingLabel?: string;
   statusLabel?: string;
+  showStop?: boolean;
   onOpen?: () => void;
   onStop?: () => void;
 };
@@ -153,6 +154,8 @@ type KopertyMapProps = {
   routeOverlay?: RouteMapOverlay | null;
   navigationControl?: NavigationToolbarControl | null;
   hideStatusChips?: boolean;
+  showRadiusControl?: boolean;
+  useViewportRadius?: boolean;
   onOsmData?: (data: OsmParkingResponse) => void;
   onUserSpotsChange?: (spots: UserAddedSpot[]) => void;
 };
@@ -160,6 +163,7 @@ type KopertyMapProps = {
 const MIN_SEARCH_RADIUS_METERS = 100;
 const MAX_SEARCH_RADIUS_METERS = 5000;
 const DEFAULT_SEARCH_RADIUS_METERS = 5000;
+const NAVIGATION_VIEWPORT_ZOOM = 16;
 const LOCAL_USER_SPOTS_KEY = "gdzietakoperta.localUserSpots.v1";
 
 const POLAND_BOUNDS: [[number, number], [number, number]] = [
@@ -289,6 +293,57 @@ function formatRadiusLabel(value: number) {
   return `${value} m`;
 }
 
+function distanceBetweenLatLngMeters(
+  first: { lat: number; lng: number },
+  second: { lat: number; lng: number }
+) {
+  const earthRadiusMeters = 6371000;
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+
+  const dLat = toRadians(second.lat - first.lat);
+  const dLng = toRadians(second.lng - first.lng);
+  const lat1 = toRadians(first.lat);
+  const lat2 = toRadians(second.lat);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) *
+      Math.cos(lat2) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+
+  return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function getViewportRadiusMeters(
+  map: import("leaflet").Map,
+  lat: number,
+  lng: number
+) {
+  const bounds = map.getBounds();
+  const center = {
+    lat,
+    lng
+  };
+
+  const corners = [
+    bounds.getNorthWest(),
+    bounds.getNorthEast(),
+    bounds.getSouthWest(),
+    bounds.getSouthEast()
+  ];
+
+  const maxDistance = Math.max(
+    ...corners.map((corner) =>
+      distanceBetweenLatLngMeters(center, {
+        lat: corner.lat,
+        lng: corner.lng
+      })
+    )
+  );
+
+  return clampRadius(Math.ceil(maxDistance / 100) * 100);
+}
 function buildPopupHtml(properties: OsmParkingProperties) {
   const title = getOsmTitle(properties);
   const capacityDisabled = properties.capacityDisabled || "brak danych";
@@ -493,6 +548,8 @@ export function KopertyMap({
   routeOverlay = null,
   navigationControl = null,
   hideStatusChips = false,
+  showRadiusControl = true,
+  useViewportRadius = false,
   onOsmData,
   onUserSpotsChange
 }: KopertyMapProps) {
@@ -1472,7 +1529,13 @@ export function KopertyMap({
     lng: number,
     radius = radiusMeters
   ) {
-    const safeRadius = clampRadius(radius);
+    const map = leafletMap.current;
+    const safeRadius =
+      useViewportRadius && map
+        ? getViewportRadiusMeters(map, lat, lng)
+        : clampRadius(radius);
+
+    setRadiusMeters(safeRadius);
 
     setLoadingOsm(true);
     setLocationMessage(
@@ -1850,7 +1913,7 @@ export function KopertyMap({
   function locateUserAndLoadOsm(radiusOverride?: number) {
     const L = leafletApi.current;
     const map = leafletMap.current;
-    const safeRadius = clampRadius(radiusOverride ?? radiusMeters);
+    const requestedRadius = clampRadius(radiusOverride ?? radiusMeters);
 
     if (!L || !map) {
       return;
@@ -1863,13 +1926,36 @@ export function KopertyMap({
       return;
     }
 
-    setRadiusMeters(safeRadius);
+    setRadiusMeters(requestedRadius);
     setLocationMessage("Czekam na zgodę na lokalizację urządzenia…");
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
+        const hadUserPosition = Boolean(userPosition.current);
+
+        if (useViewportRadius) {
+          if (!hadUserPosition) {
+            map.setView(
+              [lat, lng],
+              Math.max(map.getZoom(), NAVIGATION_VIEWPORT_ZOOM),
+              {
+                animate: false
+              }
+            );
+          } else {
+            map.panTo([lat, lng], {
+              animate: true
+            });
+          }
+        }
+
+        const safeRadius = useViewportRadius
+          ? getViewportRadiusMeters(map, lat, lng)
+          : requestedRadius;
+
+        setRadiusMeters(safeRadius);
 
         userPosition.current = {
           lat,
@@ -1910,9 +1996,11 @@ export function KopertyMap({
           }).addTo(map);
         }
 
+       if (!useViewportRadius) {
         map.fitBounds(userCircle.current.getBounds(), {
           padding: [24, 24]
         });
+      }
 
         void fetchOsmParking(lat, lng, safeRadius);
         keepUserLocationVisible();
@@ -2013,6 +2101,7 @@ export function KopertyMap({
                     : "Nawigacja"}
                 </button>
 
+               {navigationControl.showStop !== false ? (
                 <button
                   className="map-btn map-btn-route-stop"
                   onClick={navigationControl.onStop}
@@ -2021,6 +2110,7 @@ export function KopertyMap({
                 >
                   Stop
                 </button>
+              ) : null}
               </>
             ) : null}
           </div>
@@ -2030,7 +2120,7 @@ export function KopertyMap({
               <div className="map-radius-inline map-country-inline">
                 <strong>Cała Polska</strong>
               </div>
-            ) : (
+            ) : showRadiusControl ? (
               <div className="map-radius-inline" aria-label="Obszar wyszukiwania">
                 <span className="map-radius-inline-min">100 m</span>
 
@@ -2059,8 +2149,8 @@ export function KopertyMap({
                 <strong className="map-radius-inline-value">
                   {formatRadiusLabel(radiusMeters)}
                 </strong>
-              </div>
-            )}
+                </div>
+              ) : null}
 
              {!hideStatusChips ? (
                 <div className="map-toolbar-chips map-toolbar-chips-compact">

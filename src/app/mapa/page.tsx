@@ -2,7 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Header } from "@/components/Header";
-import { KopertyMap, type RouteMapOverlay } from "@/components/KopertyMap";
+import {
+  KopertyMap,
+  type RouteMapOverlay,
+  type UserAddedSpot
+} from "@/components/KopertyMap";
 import {
   formatMeters,
   formatObjectType,
@@ -317,6 +321,7 @@ function getFeatureLatLng(feature?: OsmParkingFeature | null) {
 
 export default function MapaPage() {
   const [assistantQuery, setAssistantQuery] = useState("");
+  const [userSpots, setUserSpots] = useState<UserAddedSpot[]>([]);
   const [assistantResult, setAssistantResult] =
     useState<RouteAssistantResponse | null>(null);
   const [routeOverlay, setRouteOverlay] = useState<RouteMapOverlay | null>(null);
@@ -686,7 +691,16 @@ function startVoiceInput() {
         body: JSON.stringify({
           query,
           userLat: position.coords.latitude,
-          userLng: position.coords.longitude
+          userLng: position.coords.longitude,
+          localSpots: userSpots.map((spot) => ({
+            id: spot.id,
+            lat: spot.lat,
+            lng: spot.lng,
+            status: spot.status,
+            osmUrl: spot.osmUrl || null,
+            osmNodeId: spot.osmNodeId || null,
+            addedByName: spot.addedByName || null
+          }))
         })
       });
 
@@ -737,15 +751,20 @@ function startVoiceInput() {
         <KopertyMap
             full
             routeOverlay={routeOverlay}
+            useViewportRadius
+            showRadiusControl={false}
             hideStatusChips
             navigationControl={
-              navigationState.active
+              assistantResult && (assistantPanelCollapsed || navigationState.active)
                 ? {
                     active: true,
-                    remainingLabel: formatNavigationDistance(
-                      navigationState.remainingMeters
-                    ),
-                    statusLabel: navigationState.message,
+                    remainingLabel: navigationState.active
+                      ? formatNavigationDistance(navigationState.remainingMeters)
+                      : assistantResult.routeSummary?.distanceLabel,
+                    statusLabel: navigationState.active
+                      ? navigationState.message
+                      : "Pokaż panel asystenta dojazdu",
+                    showStop: navigationState.active,
                     onOpen: () => setAssistantPanelCollapsed(false),
                     onStop: stopNavigation
                   }
@@ -848,15 +867,13 @@ function startVoiceInput() {
                       </div>
                     ) : null}
 
-                    {navigationState.active ? (
-                      <button
-                        type="button"
-                        className="route-assistant-mapbar-collapse"
-                        onClick={() => setAssistantPanelCollapsed(true)}
-                      >
-                        Zwiń
-                      </button>
-                    ) : null}
+                 <button
+                    type="button"
+                    className="route-assistant-mapbar-collapse"
+                    onClick={() => setAssistantPanelCollapsed(true)}
+                  >
+                    Zwiń
+                  </button>
                   </div>
                 </div>
 
