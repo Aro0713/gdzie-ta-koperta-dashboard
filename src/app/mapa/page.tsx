@@ -47,6 +47,52 @@ type NavigationState = {
 const OFF_ROUTE_THRESHOLD_METERS = 90;
 const ARRIVED_THRESHOLD_METERS = 35;
 const EARTH_RADIUS_METERS = 6371000;
+type GtkSpeechRecognitionAlternative = {
+  transcript: string;
+  confidence?: number;
+};
+
+type GtkSpeechRecognitionResult = {
+  isFinal: boolean;
+  length: number;
+  [index: number]: GtkSpeechRecognitionAlternative;
+};
+
+type GtkSpeechRecognitionResultList = {
+  length: number;
+  [index: number]: GtkSpeechRecognitionResult;
+};
+
+type GtkSpeechRecognitionEvent = {
+  resultIndex: number;
+  results: GtkSpeechRecognitionResultList;
+};
+
+type GtkSpeechRecognitionErrorEvent = {
+  error?: string;
+  message?: string;
+};
+
+type GtkSpeechRecognitionInstance = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  maxAlternatives: number;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onstart: (() => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: GtkSpeechRecognitionErrorEvent) => void) | null;
+  onresult: ((event: GtkSpeechRecognitionEvent) => void) | null;
+};
+
+type GtkSpeechRecognitionConstructor = new () => GtkSpeechRecognitionInstance;
+
+type WindowWithSpeechRecognition = Window & {
+  SpeechRecognition?: GtkSpeechRecognitionConstructor;
+  webkitSpeechRecognition?: GtkSpeechRecognitionConstructor;
+};
 
 function toRadians(value: number) {
   return (value * Math.PI) / 180;
@@ -93,6 +139,20 @@ function isValidLatLng(lat: number, lng: number) {
     lat <= 90 &&
     lng >= -180 &&
     lng <= 180
+  );
+}
+
+function getSpeechRecognitionConstructor() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const speechWindow = window as WindowWithSpeechRecognition;
+
+  return (
+    speechWindow.SpeechRecognition ||
+    speechWindow.webkitSpeechRecognition ||
+    null
   );
 }
 
@@ -254,6 +314,12 @@ export default function MapaPage() {
 
   const navigationWatchId = useRef<number | null>(null);
 
+  const speechRecognitionRef = useRef<GtkSpeechRecognitionInstance | null>(null);
+
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const [speechListening, setSpeechListening] = useState(false);
+  const [speechMessage, setSpeechMessage] = useState<string | null>(null);
+
   useEffect(() => {
     return () => {
       if (
@@ -266,6 +332,104 @@ export default function MapaPage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+  setSpeechSupported(Boolean(getSpeechRecognitionConstructor()));
+
+  return () => {
+    if (speechRecognitionRef.current) {
+      speechRecognitionRef.current.abort();
+      speechRecognitionRef.current = null;
+    }
+  };
+}, []);
+
+function stopVoiceInput() {
+  if (speechRecognitionRef.current) {
+    speechRecognitionRef.current.stop();
+    speechRecognitionRef.current = null;
+  }
+
+  setSpeechListening(false);
+}
+
+function startVoiceInput() {
+  const SpeechRecognition = getSpeechRecognitionConstructor();
+
+  if (!SpeechRecognition) {
+    setSpeechSupported(false);
+    setSpeechMessage(
+      "Ta przeglądarka nie obsługuje rozpoznawania mowy. Wpisz cel ręcznie."
+    );
+    return;
+  }
+
+  if (speechListening) {
+    stopVoiceInput();
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+
+  recognition.lang = "pl-PL";
+  recognition.interimResults = true;
+  recognition.continuous = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.onstart = () => {
+    setSpeechListening(true);
+    setSpeechMessage("Słucham. Powiedz cel podróży.");
+  };
+
+  recognition.onend = () => {
+    setSpeechListening(false);
+    speechRecognitionRef.current = null;
+  };
+
+  recognition.onerror = (event) => {
+    setSpeechListening(false);
+    speechRecognitionRef.current = null;
+
+    if (event.error === "not-allowed") {
+      setSpeechMessage(
+        "Brak zgody na mikrofon. Włącz zgodę w przeglądarce albo wpisz cel ręcznie."
+      );
+      return;
+    }
+
+    setSpeechMessage("Nie udało się rozpoznać mowy. Spróbuj ponownie.");
+  };
+
+  recognition.onresult = (event) => {
+    let transcript = "";
+
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const result = event.results[index];
+      const alternative = result[0];
+
+      if (alternative?.transcript) {
+        transcript += alternative.transcript;
+      }
+    }
+
+    const cleanTranscript = transcript.trim();
+
+    if (cleanTranscript) {
+      setAssistantQuery(cleanTranscript);
+      setSpeechMessage(`Rozpoznano: ${cleanTranscript}`);
+    }
+  };
+
+  speechRecognitionRef.current = recognition;
+
+  try {
+    recognition.start();
+  } catch {
+    speechRecognitionRef.current = null;
+    setSpeechListening(false);
+    setSpeechMessage("Nie udało się uruchomić mikrofonu.");
+  }
+}
 
   function getCurrentPosition() {
     return new Promise<GeolocationPosition>((resolve, reject) => {
@@ -442,6 +606,7 @@ export default function MapaPage() {
     }
 
     stopNavigation();
+    stopVoiceInput();
     setAssistantPanelCollapsed(false);
 
     setAssistantLoading(true);
@@ -542,23 +707,59 @@ export default function MapaPage() {
               <label htmlFor="route-assistant-query">Cel podróży</label>
 
               <div className="route-assistant-mapbar-row">
+              <div className="route-assistant-mapbar-input-wrap">
                 <input
                   id="route-assistant-query"
                   value={assistantQuery}
-                  onChange={(event) => setAssistantQuery(event.target.value)}
+                  onChange={(event) => {
+                    setAssistantQuery(event.target.value);
+                    setSpeechMessage(null);
+                  }}
                   placeholder="Dokąd jedziesz?"
                   type="text"
                 />
 
                 <button
-                  type="submit"
-                  className="route-assistant-mapbar-submit"
-                  disabled={assistantLoading}
+                  type="button"
+                  className={`route-assistant-mic-button ${
+                    speechListening ? "route-assistant-mic-button-active" : ""
+                  }`}
+                  onClick={speechListening ? stopVoiceInput : startVoiceInput}
+                  disabled={!speechSupported || assistantLoading}
+                  aria-label={
+                    speechListening
+                      ? "Zatrzymaj rozpoznawanie mowy"
+                      : "Powiedz cel podróży"
+                  }
+                  title={
+                    speechSupported
+                      ? "Powiedz cel podróży"
+                      : "Ta przeglądarka nie obsługuje rozpoznawania mowy"
+                  }
                 >
-                  {assistantLoading ? "Szukam…" : "Pokaż"}
+                  {speechListening ? "■" : "🎙"}
                 </button>
               </div>
+
+              <button
+                type="submit"
+                className="route-assistant-mapbar-submit"
+                disabled={assistantLoading}
+              >
+                {assistantLoading ? "Szukam…" : "Pokaż"}
+              </button>
+            </div>
             </form>
+
+            {speechMessage ? (
+            <div
+              className={`route-assistant-voice-hint ${
+                speechListening ? "route-assistant-voice-hint-active" : ""
+              }`}
+            >
+              {speechMessage}
+            </div>
+          ) : null}
 
             {assistantError ? (
               <div className="route-assistant-mapbar-error">

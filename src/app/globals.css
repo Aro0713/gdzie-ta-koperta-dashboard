@@ -3772,3 +3772,74 @@ textarea {
     width: 100%;
   }
 }
+/* --- GTK: voice input for route assistant --- */
+
+.route-assistant-mapbar-input-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.route-assistant-mapbar-input-wrap input {
+  width: 100%;
+  padding-right: 54px;
+}
+
+.route-assistant-mic-button {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  color: #0c4a8a;
+  background: rgba(20, 119, 212, 0.1);
+  font-size: 1rem;
+  font-weight: 1000;
+  transform: translateY(-50%);
+}
+
+.route-assistant-mic-button:hover {
+  color: #ffffff;
+  background: #1477d4;
+}
+
+.route-assistant-mic-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.route-assistant-mic-button-active {
+  color: #ffffff;
+  background: #dc2626;
+  animation: routeAssistantMicPulse 1.2s ease-in-out infinite;
+}
+
+.route-assistant-voice-hint {
+  padding: 8px 11px;
+  border-radius: 14px;
+  color: #344054;
+  background: rgba(20, 32, 51, 0.06);
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.route-assistant-voice-hint-active {
+  color: #0c4a8a;
+  background: rgba(20, 119, 212, 0.1);
+}
+
+@keyframes routeAssistantMicPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.28);
+  }
+
+  50% {
+    box-shadow: 0 0 0 8px rgba(220, 38, 38, 0);
+  }
+}
