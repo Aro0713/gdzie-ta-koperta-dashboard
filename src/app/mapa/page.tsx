@@ -32,12 +32,31 @@ type RouteAssistantResponse = {
     distanceLabel: string;
     durationLabel: string;
   };
+    routeToSpot?: RouteMapOverlay["route"] | null;
+  routeToSpotCoordinates?: RouteMapOverlay["routeCoordinates"];
+  routeToSpotSummary?: {
+    distanceMeters: number | null;
+    durationSeconds: number | null;
+    distanceLabel: string;
+    durationLabel: string;
+  } | null;
+  routeToDestination?: RouteMapOverlay["route"] | null;
+  routeToDestinationCoordinates?: RouteMapOverlay["routeCoordinates"];
+  routeToDestinationSummary?: {
+    distanceMeters: number | null;
+    durationSeconds: number | null;
+    distanceLabel: string;
+    durationLabel: string;
+  } | null;
+  spotDistanceToDestinationMeters?: number | null;
+  spotDistanceToDestinationLabel?: string;
   answer?: string;
   error?: string;
   details?: unknown;
 };
 
 type NavigationStatus = "idle" | "on_route" | "off_route" | "arrived";
+type NavigationTargetMode = "spot" | "destination";
 
 type NavigationState = {
   active: boolean;
@@ -319,11 +338,57 @@ function getFeatureLatLng(feature?: OsmParkingFeature | null) {
   };
 }
 
+function getRouteForMode(
+  result: RouteAssistantResponse | null,
+  mode: NavigationTargetMode | null
+) {
+  if (!result || !mode) {
+    return null;
+  }
+
+  if (mode === "spot") {
+    return result.routeToSpot || result.route || null;
+  }
+
+  return result.routeToDestination || result.route || null;
+}
+
+function getRouteCoordinatesForMode(
+  result: RouteAssistantResponse | null,
+  mode: NavigationTargetMode | null
+) {
+  if (!result || !mode) {
+    return null;
+  }
+
+  if (mode === "spot") {
+    return result.routeToSpotCoordinates || result.routeCoordinates || null;
+  }
+
+  return result.routeToDestinationCoordinates || result.routeCoordinates || null;
+}
+
+function getRouteSummaryForMode(
+  result: RouteAssistantResponse | null,
+  mode: NavigationTargetMode | null
+) {
+  if (!result || !mode) {
+    return null;
+  }
+
+  if (mode === "spot") {
+    return result.routeToSpotSummary || result.routeSummary || null;
+  }
+
+  return result.routeToDestinationSummary || result.routeSummary || null;
+}
 export default function MapaPage() {
   const [assistantQuery, setAssistantQuery] = useState("");
   const [userSpots, setUserSpots] = useState<UserAddedSpot[]>([]);
   const [assistantResult, setAssistantResult] =
     useState<RouteAssistantResponse | null>(null);
+  const [selectedTargetMode, setSelectedTargetMode] =
+    useState<NavigationTargetMode | null>(null);
   const [routeOverlay, setRouteOverlay] = useState<RouteMapOverlay | null>(null);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantError, setAssistantError] = useState<string | null>(null);
@@ -472,22 +537,67 @@ function startVoiceInput() {
     });
   }
 
-  function getNavigationTarget(result = assistantResult) {
-    const recommendedSpotTarget = getFeatureLatLng(result?.recommendedSpot);
+  function selectNavigationTarget(mode: NavigationTargetMode) {
+  if (!assistantResult) {
+    return;
+  }
 
-    if (recommendedSpotTarget) {
-      return recommendedSpotTarget;
-    }
+  if (mode === "spot" && !assistantResult.recommendedSpot) {
+    setAssistantError("Brak rekomendowanej koperty przy tym celu.");
+    return;
+  }
 
-    if (result?.destination) {
-      return {
-        lat: result.destination.lat,
-        lng: result.destination.lng
-      };
-    }
+  if (navigator.geolocation && navigationWatchId.current !== null) {
+    navigator.geolocation.clearWatch(navigationWatchId.current);
+    navigationWatchId.current = null;
+  }
 
+  setAssistantError(null);
+  setSelectedTargetMode(mode);
+  setAssistantPanelCollapsed(false);
+
+  const route = getRouteForMode(assistantResult, mode);
+  const routeCoordinates = getRouteCoordinatesForMode(assistantResult, mode);
+
+  setRouteOverlay({
+    route,
+    routeCoordinates,
+    destination: assistantResult.destination || null,
+    recommendedSpot: assistantResult.recommendedSpot || null,
+    fitMode: "route"
+  });
+
+  setNavigationState({
+    active: false,
+    status: "idle",
+    message:
+      mode === "spot"
+        ? "Wybrano prowadzenie do koperty. Możesz uruchomić nawigację."
+        : "Wybrano prowadzenie pod wskazany adres. Możesz uruchomić nawigację.",
+    remainingMeters: null,
+    distanceToRouteMeters: null,
+    accuracyMeters: null
+  });
+}
+
+function getNavigationTarget(result = assistantResult) {
+  if (!result || !selectedTargetMode) {
     return null;
   }
+
+  if (selectedTargetMode === "spot") {
+    return getFeatureLatLng(result.recommendedSpot);
+  }
+
+  if (selectedTargetMode === "destination" && result.destination) {
+    return {
+      lat: result.destination.lat,
+      lng: result.destination.lng
+    };
+  }
+
+  return null;
+}
 
   function updateNavigationFromPosition(position: GeolocationPosition) {
     if (!assistantResult) {
@@ -519,10 +629,16 @@ function startVoiceInput() {
       ? distanceMeters(currentPosition, target)
       : null;
 
+    const activeRoute = getRouteForMode(assistantResult, selectedTargetMode);
+    const activeRouteCoordinates = getRouteCoordinatesForMode(
+      assistantResult,
+      selectedTargetMode
+    );
+
     const routeDistanceMeters = distanceToRouteMeters(
       currentPosition,
-      assistantResult.route,
-      assistantResult.routeCoordinates
+      activeRoute,
+      activeRouteCoordinates
     );
 
     let status: NavigationStatus = "on_route";
@@ -548,9 +664,9 @@ function startVoiceInput() {
       accuracyMeters: currentPosition.accuracyMeters
     });
 
-    setRouteOverlay({
-      route: assistantResult.route || null,
-      routeCoordinates: assistantResult.routeCoordinates || null,
+   setRouteOverlay({
+      route: activeRoute,
+      routeCoordinates: activeRouteCoordinates,
       destination: assistantResult.destination || null,
       recommendedSpot: assistantResult.recommendedSpot || null,
       currentPosition,
@@ -601,10 +717,13 @@ function startVoiceInput() {
     }));
     setAssistantPanelCollapsed(false);
 
-    if (assistantResult) {
+   if (assistantResult) {
       setRouteOverlay({
-        route: assistantResult.route || null,
-        routeCoordinates: assistantResult.routeCoordinates || null,
+        route: getRouteForMode(assistantResult, selectedTargetMode),
+        routeCoordinates: getRouteCoordinatesForMode(
+          assistantResult,
+          selectedTargetMode
+        ),
         destination: assistantResult.destination || null,
         recommendedSpot: assistantResult.recommendedSpot || null,
         fitMode: "route"
@@ -618,7 +737,12 @@ function startVoiceInput() {
       return;
     }
 
-    if (!assistantResult.recommendedSpot) {
+    if (!selectedTargetMode) {
+      setAssistantError("Wybierz, czy prowadzić do koperty, czy pod wskazany adres.");
+      return;
+    }
+
+    if (selectedTargetMode === "spot" && !assistantResult.recommendedSpot) {
       setAssistantError("Brak rekomendowanej koperty, do której można prowadzić.");
       return;
     }
@@ -679,6 +803,7 @@ function startVoiceInput() {
     setAssistantError(null);
     setAssistantResult(null);
     setRouteOverlay(null);
+    setSelectedTargetMode(null);
 
     try {
       const position = await getCurrentPosition();
@@ -711,18 +836,34 @@ function startVoiceInput() {
       }
 
       setAssistantResult(data);
+
+    if (data.recommendedSpot) {
       setRouteOverlay({
-        route: data.route || null,
-        routeCoordinates: data.routeCoordinates || null,
+        route: null,
+        routeCoordinates: null,
         destination: data.destination || null,
         recommendedSpot: data.recommendedSpot || null,
         fitMode: "route"
       });
+    } else {
+      setSelectedTargetMode("destination");
+
+      setRouteOverlay({
+        route: data.routeToDestination || data.route || null,
+        routeCoordinates:
+          data.routeToDestinationCoordinates || data.routeCoordinates || null,
+        destination: data.destination || null,
+        recommendedSpot: null,
+        fitMode: "route"
+      });
+    }
 
       setNavigationState({
         active: false,
         status: "idle",
-        message: "Trasa gotowa. Możesz uruchomić prowadzenie do koperty.",
+        message: data.recommendedSpot
+        ? "Wybierz, czy prowadzić do koperty, czy pod wskazany adres."
+        : "Trasa pod wskazany adres jest gotowa.",
         remainingMeters: null,
         distanceToRouteMeters: null,
         accuracyMeters: null
@@ -741,6 +882,17 @@ function startVoiceInput() {
   }
 
   const recommendedProperties = assistantResult?.recommendedSpot?.properties;
+
+  const selectedRouteSummary = getRouteSummaryForMode(
+    assistantResult,
+    selectedTargetMode
+  );
+
+  const destinationRouteSummary =
+    assistantResult?.routeToDestinationSummary || assistantResult?.routeSummary;
+
+  const spotRouteSummary =
+    assistantResult?.routeToSpotSummary || assistantResult?.routeSummary;
 
   return (
     <main className="page-shell page-shell-navigation">
@@ -860,12 +1012,12 @@ function startVoiceInput() {
                   </div>
 
                   <div className="route-assistant-mapbar-result-actions">
-                    {assistantResult.routeSummary ? (
-                      <div className="route-assistant-mapbar-summary">
-                        <span>{assistantResult.routeSummary.durationLabel}</span>
-                        <strong>{assistantResult.routeSummary.distanceLabel}</strong>
-                      </div>
-                    ) : null}
+                    {selectedRouteSummary ? (
+                  <div className="route-assistant-mapbar-summary">
+                    <span>{selectedRouteSummary.durationLabel}</span>
+                    <strong>{selectedRouteSummary.distanceLabel}</strong>
+                  </div>
+                ) : null}
 
                  <button
                     type="button"
@@ -880,6 +1032,49 @@ function startVoiceInput() {
                 {assistantResult.answer ? (
                   <p>{assistantResult.answer}</p>
                 ) : null}
+
+              <div className="route-target-choice">
+                {assistantResult.recommendedSpot ? (
+                  <button
+                    type="button"
+                    className={`route-target-choice-button ${
+                      selectedTargetMode === "spot" ? "route-target-choice-button-active" : ""
+                    }`}
+                    onClick={() => selectNavigationTarget("spot")}
+                  >
+                    <span>Nawiguj do koperty</span>
+                    <strong>
+                      {assistantResult.spotDistanceToDestinationLabel
+                        ? `Koperta ${assistantResult.spotDistanceToDestinationLabel} od celu`
+                        : "Najbliższe miejsce postoju"}
+                    </strong>
+                    {spotRouteSummary ? (
+                      <small>
+                        {spotRouteSummary.durationLabel} · {spotRouteSummary.distanceLabel}
+                      </small>
+                    ) : null}
+                  </button>
+                ) : null}
+
+                <button
+                  type="button"
+                  className={`route-target-choice-button ${
+                    selectedTargetMode === "destination"
+                      ? "route-target-choice-button-active"
+                      : ""
+                  }`}
+                  onClick={() => selectNavigationTarget("destination")}
+                >
+                  <span>Nawiguj pod adres</span>
+                  <strong>Jedź bezpośrednio do celu</strong>
+                  {destinationRouteSummary ? (
+                    <small>
+                      {destinationRouteSummary.durationLabel} ·{" "}
+                      {destinationRouteSummary.distanceLabel}
+                    </small>
+                  ) : null}
+                </button>
+              </div>
 
                 <div className="route-navigation-panel route-navigation-panel-compact">
                   <strong>Prowadzenie</strong>

@@ -568,6 +568,11 @@ export function KopertyMap({
   const pendingUserSpotPopupId = useRef<string | null>(null);
   const userPosition = useRef<{ lat: number; lng: number } | null>(null);
 
+  const programmaticMapMove = useRef(false);
+  const navigationControlRef = useRef<NavigationToolbarControl | null>(null);
+
+  const [navigationFollowPaused, setNavigationFollowPaused] = useState(false);
+
   const [locationMessage, setLocationMessage] = useState(
     isGtkCountryMode
       ? "Mapa kraju gotowa. Pobieram koperty GTK z OpenStreetMap."
@@ -657,6 +662,15 @@ export function KopertyMap({
       );
 
       leafletMap.current = map;
+
+      const pauseNavigationFollow = () => {
+        if (!programmaticMapMove.current && navigationControlRef.current?.active) {
+          setNavigationFollowPaused(true);
+        }
+      };
+
+      map.on("dragstart", pauseNavigationFollow);
+      map.on("zoomstart", pauseNavigationFollow);
 
       const osmBaseLayer = L.tileLayer(appConfig.tileUrl, {
         attribution: appConfig.tileAttribution,
@@ -876,6 +890,14 @@ export function KopertyMap({
   useEffect(() => {
     drawRouteOverlay(routeOverlay);
   }, [routeOverlay]);
+
+  useEffect(() => {
+    navigationControlRef.current = navigationControl;
+
+    if (!navigationControl?.active) {
+      setNavigationFollowPaused(false);
+    }
+  }, [navigationControl]);
 
   useEffect(() => {
     if (userAddedSpots.length === 0 && showRemoveChooser) {
@@ -1144,14 +1166,22 @@ export function KopertyMap({
     }
 
     if (
-    overlay.fitMode === "follow" &&
-    overlay.currentPosition &&
-    hasValidCoordinates(overlay.currentPosition.lat, overlay.currentPosition.lng)
-  ) {
-    map.panTo([overlay.currentPosition.lat, overlay.currentPosition.lng], {
-      animate: true
-    });
-  } else if (overlay.fitMode !== "none") {
+      overlay.fitMode === "follow" &&
+      overlay.currentPosition &&
+      hasValidCoordinates(overlay.currentPosition.lat, overlay.currentPosition.lng)
+    ) {
+      if (!navigationFollowPaused) {
+        programmaticMapMove.current = true;
+
+        map.panTo([overlay.currentPosition.lat, overlay.currentPosition.lng], {
+          animate: true
+        });
+
+        window.setTimeout(() => {
+          programmaticMapMove.current = false;
+        }, 450);
+      }
+    } else if (overlay.fitMode !== "none") {
       if (boundsPoints.length > 1) {
         map.fitBounds(L.latLngBounds(boundsPoints), {
           padding: [42, 42],
@@ -2018,6 +2048,30 @@ export function KopertyMap({
     );
   }
 
+  function recenterNavigation() {
+  const map = leafletMap.current;
+  const currentPosition = routeOverlay?.currentPosition;
+
+  if (
+    !map ||
+    !currentPosition ||
+    !hasValidCoordinates(currentPosition.lat, currentPosition.lng)
+  ) {
+    return;
+  }
+
+  setNavigationFollowPaused(false);
+  programmaticMapMove.current = true;
+
+  map.panTo([currentPosition.lat, currentPosition.lng], {
+    animate: true
+  });
+
+  window.setTimeout(() => {
+    programmaticMapMove.current = false;
+  }, 450);
+}
+
   return (
     <div className={`map-shell ${full ? "map-shell-full" : ""}`}>
       <div
@@ -2088,7 +2142,7 @@ export function KopertyMap({
                 {showRemoveChooser ? "Anuluj" : "Usuń"}
               </button>
             ) : null}
-            {navigationControl?.active ? (
+                {navigationControl?.active ? (
               <>
                 <button
                   className="map-btn map-btn-route-navigation"
@@ -2101,7 +2155,18 @@ export function KopertyMap({
                     : "Nawigacja"}
                 </button>
 
-               {navigationControl.showStop !== false ? (
+                {navigationFollowPaused ? (
+                  <button
+                    className="map-btn map-btn-route-recenter"
+                    onClick={recenterNavigation}
+                    type="button"
+                    title="Wróć do aktualnej lokalizacji"
+                  >
+                    Wyśrodkuj
+                  </button>
+                ) : null}
+
+              {navigationControl.showStop !== false ? (
                 <button
                   className="map-btn map-btn-route-stop"
                   onClick={navigationControl.onStop}
@@ -2111,8 +2176,8 @@ export function KopertyMap({
                   Stop
                 </button>
               ) : null}
-              </>
-            ) : null}
+            </>
+          ) : null}
           </div>
 
           <div className="map-toolbar-compact-right">

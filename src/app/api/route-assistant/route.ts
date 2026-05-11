@@ -495,6 +495,17 @@ function extractRouteCoordinates(route: OrsFeatureCollection) {
       };
     })
     .filter((point): point is { lat: number; lng: number } => Boolean(point));
+    }
+
+function buildRouteSummary(route: OrsFeatureCollection | null) {
+  const summary = route?.features?.[0]?.properties?.summary || null;
+
+  return {
+    distanceMeters: summary?.distance ?? null,
+    durationSeconds: summary?.duration ?? null,
+    distanceLabel: formatMeters(summary?.distance),
+    durationLabel: formatDuration(summary?.duration)
+  };
 }
 
 async function getOsmParkingNearDestination(
@@ -777,33 +788,44 @@ export async function POST(request: NextRequest) {
 
     const recommendedSpot = pickBestSpot(parkingData);
 
-    const routeTarget = recommendedSpot
-      ? getSpotLatLng(recommendedSpot)
-      : {
-          lat: destination.lat,
-          lng: destination.lng
-        };
-
-    const route = await getRoute({
+    const routeToDestination = await getRoute({
       startLat: userLat,
       startLng: userLng,
-      endLat: routeTarget.lat,
-      endLng: routeTarget.lng
+      endLat: destination.lat,
+      endLng: destination.lng
     });
 
-    const routeSummary = route.features[0]?.properties?.summary || null;
+    const routeToDestinationSummary = buildRouteSummary(routeToDestination);
+
+    let routeToSpot: OrsFeatureCollection | null = null;
+    let routeToSpotSummary: ReturnType<typeof buildRouteSummary> | null = null;
+
+    if (recommendedSpot) {
+      const spotTarget = getSpotLatLng(recommendedSpot);
+
+      routeToSpot = await getRoute({
+        startLat: userLat,
+        startLng: userLng,
+        endLat: spotTarget.lat,
+        endLng: spotTarget.lng
+      });
+
+      routeToSpotSummary = buildRouteSummary(routeToSpot);
+    }
+
+    const primaryRoute = routeToSpot || routeToDestination;
+    const primaryRouteSummary = routeToSpotSummary || routeToDestinationSummary;
+
     const spotDistanceToDestination =
       recommendedSpot?.properties?.distanceMeters ?? null;
 
     const recommendedType = getRecommendedType(recommendedSpot);
 
     const answer = recommendedSpot
-      ? `Znalazłem miejsce postoju przy celu. ${recommendedType}. Odległość od celu: ${formatMeters(
+      ? `Znalazłem cel podróży. Najbliższe miejsce postoju: ${recommendedType}. Koperta jest oddalona od celu o ${formatMeters(
           spotDistanceToDestination
-        )}. Dojazd samochodem: ${formatDuration(routeSummary?.duration)}.`
-      : `Nie znalazłem oznaczonej koperty przy celu w promieniu 5 km. Pokazuję trasę bezpośrednio do celu. Dojazd samochodem: ${formatDuration(
-          routeSummary?.duration
-        )}.`;
+        )}. Możesz prowadzić do koperty albo pod wskazany adres.`
+      : `Nie znalazłem oznaczonej koperty przy celu w promieniu 5 km. Mogę prowadzić bezpośrednio pod wskazany adres.`;
 
     const recommendedKey = recommendedSpot ? getFeatureKey(recommendedSpot) : null;
 
@@ -812,6 +834,8 @@ export async function POST(request: NextRequest) {
       query,
       destination,
       recommendedSpot,
+      spotDistanceToDestinationMeters: spotDistanceToDestination,
+      spotDistanceToDestinationLabel: formatMeters(spotDistanceToDestination),
       alternatives: (parkingData.features || [])
         .filter((feature) => {
           if (!recommendedKey) {
@@ -821,14 +845,20 @@ export async function POST(request: NextRequest) {
           return getFeatureKey(feature) !== recommendedKey;
         })
         .slice(0, 5),
-      route,
-      routeCoordinates: extractRouteCoordinates(route),
-      routeSummary: {
-        distanceMeters: routeSummary?.distance ?? null,
-        durationSeconds: routeSummary?.duration ?? null,
-        distanceLabel: formatMeters(routeSummary?.distance),
-        durationLabel: formatDuration(routeSummary?.duration)
-      },
+
+      // Backwards compatibility: domyślnie trasa do koperty, a jeśli jej brak — do celu.
+      route: primaryRoute,
+      routeCoordinates: extractRouteCoordinates(primaryRoute),
+      routeSummary: primaryRouteSummary,
+
+      routeToSpot,
+      routeToSpotCoordinates: routeToSpot ? extractRouteCoordinates(routeToSpot) : [],
+      routeToSpotSummary,
+
+      routeToDestination,
+      routeToDestinationCoordinates: extractRouteCoordinates(routeToDestination),
+      routeToDestinationSummary,
+
       sourceCounts: {
         osm: osmParkingData.features?.length || 0,
         gtkRegistry: gtkSubmissionFeatures.length,

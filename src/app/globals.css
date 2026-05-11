@@ -3900,3 +3900,67 @@ textarea {
     0 16px 38px rgba(20, 83, 45, 0.34),
     0 0 0 7px rgba(22, 163, 74, 0.18) !important;
 }
+/* --- GTK: route target choice --- */
+
+.route-target-choice {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.route-target-choice-button {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid rgba(20, 32, 51, 0.12);
+  border-radius: 16px;
+  cursor: pointer;
+  color: #243044;
+  background: rgba(248, 251, 255, 0.88);
+  text-align: left;
+}
+
+.route-target-choice-button span {
+  color: var(--blue-dark);
+  font-size: 0.74rem;
+  font-weight: 1000;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.route-target-choice-button strong {
+  color: var(--surface-dark);
+  font-size: 0.88rem;
+  font-weight: 1000;
+  line-height: 1.24;
+}
+
+.route-target-choice-button small {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.route-target-choice-button-active {
+  border-color: rgba(124, 58, 237, 0.42);
+  background: rgba(124, 58, 237, 0.1);
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.08);
+}
+
+@media (max-width: 860px) {
+  .route-target-choice {
+    grid-template-columns: 1fr;
+  }
+}
+/* --- GTK: recenter navigation button --- */
+
+.map-btn-route-recenter {
+  color: #0c4a8a;
+  background: rgba(20, 119, 212, 0.12);
+}
+
+.map-btn-route-recenter:hover {
+  color: #ffffff;
+  background: #1477d4;
+}
