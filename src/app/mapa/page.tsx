@@ -1,14 +1,13 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Header } from "@/components/Header";
 import { KopertyMap, type RouteMapOverlay } from "@/components/KopertyMap";
 import {
   formatMeters,
   formatObjectType,
   getOsmTitle,
-  type OsmParkingFeature,
-  type OsmParkingResponse
+  type OsmParkingFeature
 } from "@/lib/osmParking";
 
 type RouteAssistantResponse = {
@@ -237,7 +236,6 @@ function getFeatureLatLng(feature?: OsmParkingFeature | null) {
 }
 
 export default function MapaPage() {
-  const [osmData, setOsmData] = useState<OsmParkingResponse | null>(null);
   const [assistantQuery, setAssistantQuery] = useState("");
   const [assistantResult, setAssistantResult] =
     useState<RouteAssistantResponse | null>(null);
@@ -267,19 +265,6 @@ export default function MapaPage() {
       }
     };
   }, []);
-
-  const nearestFeatures = useMemo(() => {
-    return [...(osmData?.features || [])]
-      .sort((a, b) => {
-        const first = a.properties?.distanceMeters ?? Number.MAX_SAFE_INTEGER;
-        const second = b.properties?.distanceMeters ?? Number.MAX_SAFE_INTEGER;
-
-        return first - second;
-      })
-      .slice(0, 6);
-  }, [osmData]);
-
-  const totalCount = osmData?.metadata?.count ?? osmData?.features.length ?? 0;
 
   function getCurrentPosition() {
     return new Promise<GeolocationPosition>((resolve, reject) => {
@@ -514,271 +499,187 @@ export default function MapaPage() {
   const recommendedProperties = assistantResult?.recommendedSpot?.properties;
 
   return (
-    <main className="page-shell">
+    <main className="page-shell page-shell-navigation">
       <Header />
 
-      <section className="subpage-hero">
-        <p className="eyebrow">pełny widok</p>
-        <h1>Mapa kopert</h1>
-        <p>
-          Mapa pokazuje istniejące dane z OpenStreetMap w promieniu wybranym
-          przez użytkownika. Dodawanie nowych kopert odbywa się bezpośrednio
-          na mapie, z konta OpenStreetMap.
-        </p>
-      </section>
+      <section className="navigation-map-section" aria-label="Mapa nawigacji">
+        <div className="navigation-map-card">
+          <KopertyMap full routeOverlay={routeOverlay} />
 
-      <section className="dashboard-grid dashboard-grid-map">
-        <div className="panel panel-large">
-          <KopertyMap
-            full
-            routeOverlay={routeOverlay}
-            onOsmData={setOsmData}
-          />
-        </div>
-
-        <aside className="panel osm-sidebar route-assistant-sidebar">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">asystent dojazdu</p>
-              <h2>Dokąd jedziesz?</h2>
-              <p className="dashboard-map-note">
-                Wpisz cel podróży. Wskażę najbliższą kopertę lub parking dla
-                OzN i policzę trasę dojazdu.
-              </p>
-            </div>
-          </div>
-
-          <form
-            className="route-assistant-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submitRouteAssistant();
-            }}
+          <div
+            className={`route-assistant-mapbar ${
+              assistantResult ? "route-assistant-mapbar-expanded" : ""
+            }`}
           >
-            <label>
-              Cel podróży
-              <input
-                value={assistantQuery}
-                onChange={(event) => setAssistantQuery(event.target.value)}
-                placeholder="np. Spodek Katowice"
-                type="text"
-              />
-            </label>
-
-            <button
-              type="submit"
-              className="primary-button route-assistant-submit"
-              disabled={assistantLoading}
+            <form
+              className="route-assistant-mapbar-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitRouteAssistant();
+              }}
             >
-              {assistantLoading ? "Szukam…" : "Pokaż trasę"}
-            </button>
-          </form>
+              <label htmlFor="route-assistant-query">Cel podróży</label>
 
-          {assistantError ? (
-            <div className="route-assistant-error">{assistantError}</div>
-          ) : null}
+              <div className="route-assistant-mapbar-row">
+                <input
+                  id="route-assistant-query"
+                  value={assistantQuery}
+                  onChange={(event) => setAssistantQuery(event.target.value)}
+                  placeholder="Dokąd jedziesz?"
+                  type="text"
+                />
 
-          {assistantResult ? (
-            <div className="route-assistant-result">
-              <strong>Rekomendacja</strong>
+                <button
+                  type="submit"
+                  className="route-assistant-mapbar-submit"
+                  disabled={assistantLoading}
+                >
+                  {assistantLoading ? "Szukam…" : "Pokaż"}
+                </button>
+              </div>
+            </form>
 
-              <p>{assistantResult.answer}</p>
+            {assistantError ? (
+              <div className="route-assistant-mapbar-error">
+                {assistantError}
+              </div>
+            ) : null}
 
-              <div className="route-navigation-panel">
-                <strong>Prowadzenie do koperty</strong>
-                <p>{navigationState.message}</p>
+            {assistantResult ? (
+              <div className="route-assistant-mapbar-result">
+                <div className="route-assistant-mapbar-result-top">
+                  <div>
+                    <span>Rekomendacja</span>
+                    <strong>
+                      {assistantResult.recommendedSpot
+                        ? "Prowadzenie do koperty"
+                        : "Trasa do celu"}
+                    </strong>
+                  </div>
 
-                <div className="route-assistant-meta">
-                  <span>
-                    Do koperty:{" "}
-                    {formatNavigationDistance(navigationState.remainingMeters)}
-                  </span>
-                  <span>
-                    Od trasy:{" "}
-                    {formatNavigationDistance(
-                      navigationState.distanceToRouteMeters
-                    )}
-                  </span>
-                </div>
-
-                <div className="route-navigation-actions">
-                  {!navigationState.active ? (
-                    <button
-                      type="button"
-                      className="primary-button route-assistant-submit"
-                      onClick={() => void startNavigation()}
-                      disabled={!assistantResult.recommendedSpot}
-                    >
-                      Start dojazdu do koperty
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="mini-button"
-                      onClick={stopNavigation}
-                    >
-                      Stop
-                    </button>
-                  )}
-
-                  {navigationState.status === "off_route" ? (
-                    <button
-                      type="button"
-                      className="mini-button"
-                      onClick={() => void submitRouteAssistant()}
-                    >
-                      Przelicz trasę
-                    </button>
+                  {assistantResult.routeSummary ? (
+                    <div className="route-assistant-mapbar-summary">
+                      <span>{assistantResult.routeSummary.durationLabel}</span>
+                      <strong>{assistantResult.routeSummary.distanceLabel}</strong>
+                    </div>
                   ) : null}
                 </div>
-              </div>
 
-              {assistantResult.destination ? (
-                <div className="route-assistant-block">
-                  <span>Cel</span>
-                  <strong>{assistantResult.destination.name}</strong>
+                {assistantResult.answer ? (
+                  <p>{assistantResult.answer}</p>
+                ) : null}
+
+                <div className="route-navigation-panel route-navigation-panel-compact">
+                  <strong>Prowadzenie</strong>
+                  <p>{navigationState.message}</p>
+
+                  <div className="route-assistant-meta">
+                    <span>
+                      Do koperty:{" "}
+                      {formatNavigationDistance(navigationState.remainingMeters)}
+                    </span>
+                    <span>
+                      Od trasy:{" "}
+                      {formatNavigationDistance(
+                        navigationState.distanceToRouteMeters
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="route-navigation-actions">
+                    {!navigationState.active ? (
+                      <button
+                        type="button"
+                        className="route-navigation-primary"
+                        onClick={() => void startNavigation()}
+                        disabled={!assistantResult.recommendedSpot}
+                      >
+                        Start dojazdu
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="route-navigation-secondary"
+                        onClick={stopNavigation}
+                      >
+                        Stop
+                      </button>
+                    )}
+
+                    {navigationState.status === "off_route" ? (
+                      <button
+                        type="button"
+                        className="route-navigation-secondary"
+                        onClick={() => void submitRouteAssistant()}
+                      >
+                        Przelicz
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-              ) : null}
 
-              {assistantResult.routeSummary ? (
-                <div className="route-assistant-meta">
-                  <span>
-                    Trasa: {assistantResult.routeSummary.distanceLabel}
-                  </span>
-                  <span>
-                    Czas: {assistantResult.routeSummary.durationLabel}
-                  </span>
-                </div>
-              ) : null}
-
-              {recommendedProperties ? (
-                <article className="osm-side-card route-assistant-spot-card">
-                  <div className="osm-side-card-top">
+                {recommendedProperties ? (
+                  <article className="route-assistant-mapbar-spot">
                     <div>
-                      <h3>{getOsmTitle(recommendedProperties)}</h3>
-                      <p>{formatObjectType(recommendedProperties.objectType)}</p>
+                      <span>Rekomendowane miejsce</span>
+                      <strong>{getOsmTitle(recommendedProperties)}</strong>
+                      <small>
+                        {formatObjectType(recommendedProperties.objectType)}
+                      </small>
                     </div>
 
-                    <span>
-                      {formatMeters(recommendedProperties.distanceMeters)}
-                    </span>
-                  </div>
+                    <div className="route-assistant-mapbar-spot-meta">
+                      <span>{formatMeters(recommendedProperties.distanceMeters)}</span>
+                      <span>
+                        nawierzchnia:{" "}
+                        {recommendedProperties.surface || "brak danych"}
+                      </span>
+                      <span>
+                        dostęp: {recommendedProperties.access || "brak danych"}
+                      </span>
+                    </div>
 
-                  <div className="osm-side-meta">
-                    <span>
-                      OzN:{" "}
-                      {recommendedProperties.capacityDisabled || "brak danych"}
-                    </span>
-                    <span>
-                      nawierzchnia:{" "}
-                      {recommendedProperties.surface || "brak danych"}
-                    </span>
-                    <span>
-                      dostęp: {recommendedProperties.access || "brak danych"}
-                    </span>
-                  </div>
-
-                  {recommendedProperties.osmUrl ? (
-                    <div className="osm-side-actions">
+                    {recommendedProperties.osmUrl ? (
                       <a
                         href={recommendedProperties.osmUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-link"
                       >
-                        Zobacz w OSM
+                        OSM
                       </a>
-                    </div>
-                  ) : null}
-                </article>
-              ) : null}
+                    ) : null}
+                  </article>
+                ) : null}
+              </div>
+            ) : null}
 
-              {assistantResult.alternatives &&
-              assistantResult.alternatives.length > 0 ? (
-                <div className="route-assistant-alternatives">
-                  <strong>Alternatywy</strong>
-
-                  {assistantResult.alternatives.slice(0, 3).map((feature) => {
-                    const properties = feature.properties || {};
-                    const key = `${properties.osmType}-${properties.osmId}`;
-
-                    return (
-                      <article className="route-assistant-alt" key={key}>
-                        <span>{getOsmTitle(properties)}</span>
-                        <strong>{formatMeters(properties.distanceMeters)}</strong>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="empty-state-card">
-              <strong>Asystent czeka na cel</strong>
+            <div
+              className="route-assistant-attribution route-assistant-attribution-mapbar"
+              aria-label="Atrybucja routingu i danych mapowych"
+            >
               <span>
-                Najpierw podaj miejsce, do którego jedziesz. Po zgodzie na
-                lokalizację znajdę najbliższe dostępne miejsce postoju.
+                Trasy:{" "}
+                <a
+                  href="https://openrouteservice.org/"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  © openrouteservice.org by HeiGIT
+                </a>
+              </span>
+              <span>
+                Dane mapy:{" "}
+                <a
+                  href="https://www.openstreetmap.org/copyright"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  © OpenStreetMap contributors
+                </a>
               </span>
             </div>
-          )}
-
-          {!assistantResult && nearestFeatures.length > 0 ? (
-            <div className="route-assistant-nearby">
-              <div className="panel-header route-assistant-mini-header">
-                <div>
-                  <p className="eyebrow">punkty OSM</p>
-                  <h3>Najbliższe teraz</h3>
-                </div>
-                <span className="map-status-pill">{totalCount}</span>
-              </div>
-
-              <div className="osm-side-list route-assistant-compact-list">
-                {nearestFeatures.map((feature) => {
-                  const properties = feature.properties || {};
-                  const key = `${properties.osmType}-${properties.osmId}`;
-
-                  return (
-                    <article className="osm-side-card" key={key}>
-                      <div className="osm-side-card-top">
-                        <div>
-                          <h3>{getOsmTitle(properties)}</h3>
-                          <p>{formatObjectType(properties.objectType)}</p>
-                        </div>
-                        <span>{formatMeters(properties.distanceMeters)}</span>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
-
-          <div
-            className="route-assistant-attribution"
-            aria-label="Atrybucja routingu i danych mapowych"
-          >
-            <span>
-              Trasy:{" "}
-              <a
-                href="https://openrouteservice.org/"
-                target="_blank"
-                rel="noreferrer"
-              >
-                © openrouteservice.org by HeiGIT
-              </a>
-            </span>
-            <span>
-              Dane mapy:{" "}
-              <a
-                href="https://www.openstreetmap.org/copyright"
-                target="_blank"
-                rel="noreferrer"
-              >
-                © OpenStreetMap contributors
-              </a>
-            </span>
           </div>
-        </aside>
+        </div>
       </section>
     </main>
   );

@@ -3418,3 +3418,286 @@ textarea {
 .route-assistant-attribution a:hover {
   text-decoration: underline;
 }
+/* --- GTK: navigation-first map page --- */
+
+.page-shell-navigation {
+  max-width: 100%;
+}
+
+.navigation-map-section {
+  width: min(100%, 1440px);
+  margin: 22px auto 0;
+  padding: 0 16px 24px;
+}
+
+.navigation-map-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.64);
+  box-shadow: var(--shadow);
+}
+
+.navigation-map-card .map-shell {
+  min-height: calc(100vh - 168px);
+  border-radius: 30px;
+}
+
+.navigation-map-card .map-node {
+  min-height: calc(100vh - 168px);
+  border-radius: 30px;
+}
+
+.route-assistant-mapbar {
+  position: absolute;
+  z-index: 1200;
+  top: 18px;
+  left: 74px;
+  width: min(430px, calc(100% - 110px));
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(20, 32, 51, 0.12);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(38, 183, 255, 0.14), transparent 18rem),
+    rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 24px 54px rgba(20, 32, 51, 0.18),
+    0 1px 0 rgba(255, 255, 255, 0.72) inset;
+  backdrop-filter: blur(18px);
+}
+
+.route-assistant-mapbar-expanded {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+}
+
+.route-assistant-mapbar-form {
+  display: grid;
+  gap: 6px;
+}
+
+.route-assistant-mapbar-form label {
+  color: var(--blue-dark);
+  font-size: 0.72rem;
+  font-weight: 1000;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.route-assistant-mapbar-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.route-assistant-mapbar-row input {
+  min-width: 0;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid rgba(20, 32, 51, 0.14);
+  border-radius: 999px;
+  outline: none;
+  color: var(--surface-dark);
+  background: rgba(248, 251, 255, 0.95);
+  font-weight: 900;
+}
+
+.route-assistant-mapbar-row input:focus {
+  border-color: rgba(20, 119, 212, 0.65);
+  box-shadow: 0 0 0 4px rgba(20, 119, 212, 0.12);
+}
+
+.route-assistant-mapbar-submit,
+.route-navigation-primary,
+.route-navigation-secondary {
+  min-height: 42px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  color: white;
+  background: linear-gradient(135deg, #1477d4, #26b7ff);
+  font-weight: 1000;
+  padding: 0 16px;
+  box-shadow: 0 12px 26px rgba(20, 119, 212, 0.22);
+}
+
+.route-assistant-mapbar-submit:disabled,
+.route-navigation-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.route-navigation-secondary {
+  color: #581c87;
+  background: rgba(124, 58, 237, 0.12);
+  box-shadow: none;
+}
+
+.route-assistant-mapbar-error {
+  padding: 10px 12px;
+  border-radius: 16px;
+  color: #7f1d1d;
+  background: rgba(239, 68, 68, 0.1);
+  font-size: 0.84rem;
+  font-weight: 900;
+}
+
+.route-assistant-mapbar-result {
+  display: grid;
+  gap: 10px;
+}
+
+.route-assistant-mapbar-result-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.route-assistant-mapbar-result-top span,
+.route-assistant-mapbar-spot span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.route-assistant-mapbar-result-top strong,
+.route-assistant-mapbar-spot strong {
+  display: block;
+  color: var(--surface-dark);
+  font-size: 1rem;
+  font-weight: 1000;
+  line-height: 1.22;
+}
+
+.route-assistant-mapbar-summary {
+  display: grid;
+  gap: 2px;
+  min-width: 88px;
+  padding: 8px 10px;
+  border-radius: 16px;
+  color: #0c4a8a;
+  background: rgba(20, 119, 212, 0.1);
+  text-align: right;
+}
+
+.route-assistant-mapbar-summary span {
+  color: #0c4a8a;
+  font-size: 0.8rem;
+  font-weight: 1000;
+}
+
+.route-assistant-mapbar-summary strong {
+  color: var(--blue-dark);
+  font-size: 0.9rem;
+}
+
+.route-assistant-mapbar-result > p {
+  margin: 0;
+  color: #26354d;
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1.42;
+}
+
+.route-navigation-panel-compact {
+  padding: 11px;
+  border-radius: 18px;
+}
+
+.route-navigation-panel-compact > strong {
+  font-size: 0.74rem;
+}
+
+.route-navigation-panel-compact > p {
+  font-size: 0.86rem;
+}
+
+.route-assistant-mapbar-spot {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(20, 32, 51, 0.09);
+  border-radius: 18px;
+  background: rgba(248, 251, 255, 0.84);
+}
+
+.route-assistant-mapbar-spot small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.route-assistant-mapbar-spot-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.route-assistant-mapbar-spot-meta span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #344054;
+  background: rgba(20, 32, 51, 0.06);
+  font-size: 0.72rem;
+}
+
+.route-assistant-mapbar-spot a {
+  justify-self: start;
+  color: var(--blue-dark);
+  font-size: 0.82rem;
+  font-weight: 1000;
+  text-decoration: none;
+}
+
+.route-assistant-mapbar-spot a:hover {
+  text-decoration: underline;
+}
+
+.route-assistant-attribution-mapbar {
+  margin-top: 0;
+  padding: 8px 10px;
+  border-radius: 14px;
+  font-size: 0.68rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+@media (max-width: 860px) {
+  .navigation-map-section {
+    padding: 0 10px 14px;
+  }
+
+  .navigation-map-card,
+  .navigation-map-card .map-shell,
+  .navigation-map-card .map-node {
+    border-radius: 24px;
+  }
+
+  .navigation-map-card .map-shell,
+  .navigation-map-card .map-node {
+    min-height: calc(100vh - 132px);
+  }
+
+  .route-assistant-mapbar {
+    top: auto;
+    left: 10px;
+    right: 10px;
+    bottom: 88px;
+    width: auto;
+    max-height: min(58vh, 520px);
+    overflow: auto;
+    border-radius: 22px;
+  }
+
+  .route-assistant-mapbar-row {
+    grid-template-columns: 1fr;
+  }
+
+  .route-assistant-mapbar-submit {
+    width: 100%;
+  }
+}
