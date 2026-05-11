@@ -3389,3 +3389,32 @@ textarea {
 .route-navigation-actions .mini-button {
   width: auto;
 }
+/* --- GTK: route assistant attribution --- */
+
+.route-assistant-attribution {
+  display: grid;
+  gap: 4px;
+  margin-top: auto;
+  padding: 11px 12px;
+  border: 1px solid rgba(20, 32, 51, 0.1);
+  border-radius: 14px;
+  color: #667085;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.route-assistant-attribution span {
+  display: block;
+}
+
+.route-assistant-attribution a {
+  color: var(--blue-dark);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.route-assistant-attribution a:hover {
+  text-decoration: underline;
+}

@@ -752,6 +752,32 @@ export default function MapaPage() {
               </div>
             </div>
           ) : null}
+
+          <div
+            className="route-assistant-attribution"
+            aria-label="Atrybucja routingu i danych mapowych"
+          >
+            <span>
+              Trasy:{" "}
+              <a
+                href="https://openrouteservice.org/"
+                target="_blank"
+                rel="noreferrer"
+              >
+                © openrouteservice.org by HeiGIT
+              </a>
+            </span>
+            <span>
+              Dane mapy:{" "}
+              <a
+                href="https://www.openstreetmap.org/copyright"
+                target="_blank"
+                rel="noreferrer"
+              >
+                © OpenStreetMap contributors
+              </a>
+            </span>
+          </div>
         </aside>
       </section>
     </main>
