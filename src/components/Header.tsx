@@ -7,7 +7,11 @@ const FACEBOOK_URL = "https://www.facebook.com/profile.php?id=61582500564569";
 export function Header() {
   return (
     <header className="site-header">
-      <Link href="/" className="brand" aria-label="Strona główna Gdzie ta koperta">
+      <Link
+        href="/"
+        className="brand"
+        aria-label="Strona główna Gdzie ta koperta"
+      >
         <span className="brand-mark">♿</span>
         <span>
           <strong>{appConfig.name}</strong>
@@ -16,7 +20,7 @@ export function Header() {
       </Link>
 
       <nav className="top-nav" aria-label="Główna nawigacja">
-        <Link href="/mapa">Mapa</Link>
+        <Link href="/mapa">Nawigacja</Link>
         <Link href="/zespol">Zespół</Link>
         <Link href="/polityka-cookies">Cookies</Link>
 
