@@ -3843,3 +3843,60 @@ textarea {
     box-shadow: 0 0 0 8px rgba(220, 38, 38, 0);
   }
 }
+/* --- GTK: live navigation user marker --- */
+
+.route-navigation-user-marker {
+  display: grid !important;
+  place-items: center !important;
+  width: 46px !important;
+  height: 46px !important;
+  border: 4px solid white !important;
+  border-radius: 999px !important;
+  color: white !important;
+  background: linear-gradient(135deg, #0f172a, #1477d4) !important;
+  box-shadow:
+    0 16px 38px rgba(15, 23, 42, 0.34),
+    0 0 0 7px rgba(20, 119, 212, 0.16) !important;
+}
+
+.route-navigation-user-marker .route-navigation-user-arrow {
+  display: grid !important;
+  width: 22px !important;
+  height: 22px !important;
+  place-items: center !important;
+  color: white !important;
+  font-size: 1rem !important;
+  line-height: 1 !important;
+  font-weight: 1000 !important;
+  transform-origin: 50% 58% !important;
+}
+
+.route-navigation-user-marker small {
+  display: block !important;
+  margin-top: -8px !important;
+  padding: 1px 6px !important;
+  border-radius: 999px !important;
+  color: #0f172a !important;
+  background: white !important;
+  font-size: 0.48rem !important;
+  line-height: 1.1 !important;
+  font-weight: 1000 !important;
+}
+
+.route-navigation-user-marker-on_route {
+  background: linear-gradient(135deg, #0f172a, #1477d4) !important;
+}
+
+.route-navigation-user-marker-off_route {
+  background: linear-gradient(135deg, #7f1d1d, #dc2626) !important;
+  box-shadow:
+    0 16px 38px rgba(127, 29, 29, 0.34),
+    0 0 0 7px rgba(220, 38, 38, 0.16) !important;
+}
+
+.route-navigation-user-marker-arrived {
+  background: linear-gradient(135deg, #14532d, #16a34a) !important;
+  box-shadow:
+    0 16px 38px rgba(20, 83, 45, 0.34),
+    0 0 0 7px rgba(22, 163, 74, 0.18) !important;
+}

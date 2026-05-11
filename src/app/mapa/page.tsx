@@ -117,6 +117,26 @@ function distanceMeters(
   return 2 * EARTH_RADIUS_METERS * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function bearingDegrees(
+  first: { lat: number; lng: number },
+  second: { lat: number; lng: number }
+) {
+  const lat1 = toRadians(first.lat);
+  const lat2 = toRadians(second.lat);
+  const dLng = toRadians(second.lng - first.lng);
+
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+
+  return (Math.atan2(y, x) * 180) / Math.PI + 360;
+}
+
+function normalizeBearing(value: number) {
+  return ((value % 360) + 360) % 360;
+}
+
 function formatNavigationDistance(value: number | null) {
   if (!Number.isFinite(Number(value))) {
     return "brak danych";
@@ -313,6 +333,7 @@ export default function MapaPage() {
   });
 
   const navigationWatchId = useRef<number | null>(null);
+  const lastNavigationPosition = useRef<{ lat: number; lng: number } | null>(null);
 
   const speechRecognitionRef = useRef<GtkSpeechRecognitionInstance | null>(null);
 
@@ -468,13 +489,25 @@ function startVoiceInput() {
       return;
     }
 
-    const currentPosition = {
+   const basePosition = {
       lat: position.coords.latitude,
-      lng: position.coords.longitude,
+      lng: position.coords.longitude
+    };
+
+    const headingDegrees = getHeadingDegrees(
+      basePosition,
+      typeof position.coords.heading === "number" ? position.coords.heading : null
+    );
+
+    const currentPosition = {
+      ...basePosition,
       accuracyMeters: Number.isFinite(position.coords.accuracy)
         ? position.coords.accuracy
-        : null
+        : null,
+      headingDegrees
     };
+
+    lastNavigationPosition.current = basePosition;
 
     const target = getNavigationTarget(assistantResult);
     const remainingMeters = target
@@ -521,11 +554,39 @@ function startVoiceInput() {
     });
   }
 
+  function getHeadingDegrees(
+  currentPosition: { lat: number; lng: number },
+  nativeHeading: number | null
+) {
+  if (
+    typeof nativeHeading === "number" &&
+    Number.isFinite(nativeHeading) &&
+    nativeHeading >= 0
+  ) {
+    return normalizeBearing(nativeHeading);
+  }
+
+  const previousPosition = lastNavigationPosition.current;
+
+  if (!previousPosition) {
+    return null;
+  }
+
+  const movedMeters = distanceMeters(previousPosition, currentPosition);
+
+  if (movedMeters < 3) {
+    return null;
+  }
+
+  return normalizeBearing(bearingDegrees(previousPosition, currentPosition));
+}
+
   function stopNavigation() {
     if (navigator.geolocation && navigationWatchId.current !== null) {
       navigator.geolocation.clearWatch(navigationWatchId.current);
       navigationWatchId.current = null;
     }
+    lastNavigationPosition.current = null;
 
     setNavigationState((current) => ({
       ...current,
@@ -574,19 +635,19 @@ function startVoiceInput() {
       updateNavigationFromPosition(firstPosition);
       setAssistantPanelCollapsed(true);
 
-      navigationWatchId.current = navigator.geolocation.watchPosition(
-        updateNavigationFromPosition,
-        () => {
-          setAssistantError(
-            "Nie mogę odświeżyć lokalizacji. Sprawdź zgodę przeglądarki."
-          );
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 12000,
-          maximumAge: 5000
-        }
-      );
+    navigationWatchId.current = navigator.geolocation.watchPosition(
+      updateNavigationFromPosition,
+      () => {
+        setAssistantError(
+          "Nie mogę odświeżyć lokalizacji. Sprawdź zgodę przeglądarki."
+        );
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 0
+      }
+    );
     } catch (error) {
       const message =
         error instanceof Error

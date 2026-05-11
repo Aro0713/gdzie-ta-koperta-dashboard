@@ -131,6 +131,7 @@ export type RouteMapOverlay = {
     lat: number;
     lng: number;
     accuracyMeters?: number | null;
+    headingDegrees?: number | null;
   } | null;
   routeStatus?: "idle" | "on_route" | "off_route" | "arrived" | null;
   fitMode?: "route" | "follow" | "none";
@@ -956,11 +957,19 @@ export function KopertyMap({
         ? ` route-navigation-user-marker-${overlay.routeStatus}`
         : "";
 
+      const headingDegrees = Number(overlay.currentPosition.headingDegrees);
+      const headingStyle = Number.isFinite(headingDegrees)
+        ? ` style="transform: rotate(${headingDegrees}deg)"`
+        : "";
+
       const navigationUserIcon = L.divIcon({
         className: `route-navigation-user-marker${statusClass}`,
-        html: "<span>TY</span>",
-        iconSize: [42, 42],
-        iconAnchor: [21, 21],
+        html: `
+          <span class="route-navigation-user-arrow"${headingStyle}>▲</span>
+          <small>TY</small>
+        `,
+        iconSize: [46, 46],
+        iconAnchor: [23, 23],
         popupAnchor: [0, -16]
       });
 
@@ -1078,15 +1087,14 @@ export function KopertyMap({
     }
 
     if (
-      overlay.fitMode === "follow" &&
-      overlay.currentPosition &&
-      hasValidCoordinates(overlay.currentPosition.lat, overlay.currentPosition.lng)
-    ) {
-      map.setView(
-        [overlay.currentPosition.lat, overlay.currentPosition.lng],
-        Math.max(map.getZoom(), 16)
-      );
-    } else if (overlay.fitMode !== "none") {
+    overlay.fitMode === "follow" &&
+    overlay.currentPosition &&
+    hasValidCoordinates(overlay.currentPosition.lat, overlay.currentPosition.lng)
+  ) {
+    map.panTo([overlay.currentPosition.lat, overlay.currentPosition.lng], {
+      animate: true
+    });
+  } else if (overlay.fitMode !== "none") {
       if (boundsPoints.length > 1) {
         map.fitBounds(L.latLngBounds(boundsPoints), {
           padding: [42, 42],
