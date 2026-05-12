@@ -20,6 +20,7 @@ export function Header() {
       </Link>
 
       <nav className="top-nav" aria-label="Główna nawigacja">
+        <Link href="/">Panel główny</Link>
         <Link href="/mapa">Nawigacja</Link>
         <Link href="/zespol">Zespół</Link>
         <Link href="/polityka-cookies">Cookies</Link>
