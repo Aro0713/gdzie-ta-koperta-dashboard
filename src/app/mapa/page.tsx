@@ -995,6 +995,7 @@ export default function MapaPage() {
           <KopertyMap
             full
             routeOverlay={routeOverlay}
+            refreshOsmOnRouteOverlay
             useViewportRadius
             showRadiusControl={false}
             hideStatusChips

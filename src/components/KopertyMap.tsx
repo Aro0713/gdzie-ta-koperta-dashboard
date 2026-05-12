@@ -163,6 +163,7 @@ type KopertyMapProps = {
   hideStatusChips?: boolean;
   showRadiusControl?: boolean;
   useViewportRadius?: boolean;
+  refreshOsmOnRouteOverlay?: boolean;
   externalUserSpotRequest?: ExternalUserSpotRequest | null;
   onExternalUserSpotRequestHandled?: (id: string) => void;
   onOsmData?: (data: OsmParkingResponse) => void;
@@ -300,6 +301,57 @@ function formatRadiusLabel(value: number) {
   }
 
   return `${value} m`;
+}
+function hasValidCoordinates(lat: number, lng: number) {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  );
+}
+function getRouteOverlayRefreshCenter(overlay: RouteMapOverlay | null) {
+  if (!overlay) {
+    return null;
+  }
+
+  if (
+    overlay.destination &&
+    hasValidCoordinates(overlay.destination.lat, overlay.destination.lng)
+  ) {
+    return {
+      lat: overlay.destination.lat,
+      lng: overlay.destination.lng
+    };
+  }
+
+  const coordinates = overlay.recommendedSpot?.geometry?.coordinates;
+
+  if (coordinates && coordinates.length >= 2) {
+    const lng = Number(coordinates[0]);
+    const lat = Number(coordinates[1]);
+
+    if (hasValidCoordinates(lat, lng)) {
+      return {
+        lat,
+        lng
+      };
+    }
+  }
+
+  if (
+    overlay.currentPosition &&
+    hasValidCoordinates(overlay.currentPosition.lat, overlay.currentPosition.lng)
+  ) {
+    return {
+      lat: overlay.currentPosition.lat,
+      lng: overlay.currentPosition.lng
+    };
+  }
+
+  return null;
 }
 
 function distanceBetweenLatLngMeters(
@@ -598,6 +650,7 @@ export function KopertyMap({
   hideStatusChips = false,
   showRadiusControl = true,
   useViewportRadius = false,
+  refreshOsmOnRouteOverlay = false,
   externalUserSpotRequest = null,
   onExternalUserSpotRequestHandled,
   onOsmData,
@@ -621,6 +674,7 @@ export function KopertyMap({
   
   const programmaticMapMove = useRef(false);
   const navigationControlRef = useRef<NavigationToolbarControl | null>(null);
+  const lastRouteOverlayParkingRefreshKey = useRef<string | null>(null);
 
   const [navigationFollowPaused, setNavigationFollowPaused] = useState(false);
 
@@ -973,6 +1027,40 @@ export function KopertyMap({
       setNavigationFollowPaused(false);
     }
   }, [navigationControl]);
+
+  useEffect(() => {
+  if (!refreshOsmOnRouteOverlay || !routeOverlay) {
+    return;
+  }
+
+  if (routeOverlay.fitMode === "follow") {
+    return;
+  }
+
+  const center = getRouteOverlayRefreshCenter(routeOverlay);
+
+  if (!center) {
+    return;
+  }
+
+  const refreshKey = `${center.lat.toFixed(6)}:${center.lng.toFixed(6)}:${
+    routeOverlay.fitMode || "route"
+  }`;
+
+  if (lastRouteOverlayParkingRefreshKey.current === refreshKey) {
+    return;
+  }
+
+  lastRouteOverlayParkingRefreshKey.current = refreshKey;
+
+  const timerId = window.setTimeout(() => {
+    void fetchOsmParking(center.lat, center.lng);
+  }, 500);
+
+  return () => {
+    window.clearTimeout(timerId);
+  };
+}, [refreshOsmOnRouteOverlay, routeOverlay]);
 
   useEffect(() => {
     if (userAddedSpots.length === 0 && showRemoveChooser) {
