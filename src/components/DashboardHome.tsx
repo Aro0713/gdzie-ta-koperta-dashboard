@@ -53,24 +53,6 @@ type GtkOsmStatsResponse = {
   error?: string;
 };
 
-type AiCandidate = {
-  id: string;
-  status: string;
-  lat: number;
-  lng: number;
-  confidence: number;
-  modelVersion: string;
-  imagerySource?: string | null;
-  thumbnailUrl?: string | null;
-  createdAt: string;
-};
-
-type AiCandidatesResponse = {
-  ok?: boolean;
-  candidates?: AiCandidate[];
-  error?: string;
-};
-
 function formatStatNumber(value: number | undefined | null) {
   const safeValue = Number(value);
 
@@ -94,10 +76,6 @@ export function DashboardHome() {
     useState<GtkOsmStatsResponse | null>(null);
   const [loadingGtkOsmStats, setLoadingGtkOsmStats] = useState(true);
   const [gtkOsmStatsError, setGtkOsmStatsError] = useState(false);
-
-  const [aiCandidates, setAiCandidates] = useState<AiCandidate[]>([]);
-  const [loadingAiCandidates, setLoadingAiCandidates] = useState(true);
-  const [aiCandidatesError, setAiCandidatesError] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -201,58 +179,6 @@ export function DashboardHome() {
     };
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    let intervalId: number | null = null;
-
-    async function loadAiCandidates() {
-      setAiCandidatesError(false);
-
-      try {
-        const response = await fetch("/api/ai-candidates", {
-          cache: "no-store"
-        });
-
-        const data = (await response.json()) as AiCandidatesResponse;
-
-        if (!response.ok || !data.ok || data.error) {
-          throw new Error(data.error || "Nie udało się pobrać kandydatów AI.");
-        }
-
-        if (!active) {
-          return;
-        }
-
-        setAiCandidates(data.candidates || []);
-      } catch {
-        if (!active) {
-          return;
-        }
-
-        setAiCandidates([]);
-        setAiCandidatesError(true);
-      } finally {
-        if (active) {
-          setLoadingAiCandidates(false);
-        }
-      }
-    }
-
-    void loadAiCandidates();
-
-    intervalId = window.setInterval(() => {
-      void loadAiCandidates();
-    }, 60000);
-
-    return () => {
-      active = false;
-
-      if (intervalId) {
-        window.clearInterval(intervalId);
-      }
-    };
-  }, []);
-
   const osmExactKoperty = useMemo(() => {
     return (osmData?.features || []).filter(
       (feature) => feature.properties?.objectType === "disabled_parking_space"
@@ -287,8 +213,6 @@ export function DashboardHome() {
       })
       .slice(0, 18);
   }, [osmData]);
-
-  const totalKopertyInVisibleArea = osmExactKoperty + userSpots.length;
 
   const pageViewsValue: string | number = loadingLiveStats
     ? "…"
@@ -341,18 +265,6 @@ export function DashboardHome() {
       ? "—"
       : formatStatNumber(gtkOsmStats?.totals?.contributors);
 
-  const osmChangesetsValue: string | number = loadingGtkOsmStats
-    ? "…"
-    : gtkOsmStatsError && !gtkOsmStats
-      ? "—"
-      : formatStatNumber(gtkOsmStats?.totals?.changesets);
-
-  const osmCountriesValue: string | number = loadingGtkOsmStats
-    ? "…"
-    : gtkOsmStatsError && !gtkOsmStats
-      ? "—"
-      : formatStatNumber(gtkOsmStats?.totals?.countries);
-
   const osmAddedDetail =
     loadingGtkOsmStats && !gtkOsmStats
       ? "Pobieram statystyki OSM GTK"
@@ -367,38 +279,7 @@ export function DashboardHome() {
         ? "Brak danych współtwórców OSM"
         : "Osoby, które dodały zmiany powiązane z GdzieTaKoperta";
 
-  const osmChangesetsDetail =
-    loadingGtkOsmStats && !gtkOsmStats
-      ? "Pobieram statystyki OSM GTK"
-      : gtkOsmStatsError && !gtkOsmStats
-        ? "Brak danych changesetów OSM"
-        : "Zestawy zmian OSM z hasłem GdzieTaKoperta";
-
-  const osmCountriesDetail =
-    loadingGtkOsmStats && !gtkOsmStats
-      ? "Pobieram kraje zmian OSM"
-      : gtkOsmStatsError && !gtkOsmStats
-        ? "Brak danych krajów zmian OSM"
-        : gtkOsmStats?.totals?.countriesDetail || "Brak danych krajów zmian OSM";
-
-  const aiCandidatesValue: string | number = loadingAiCandidates
-    ? "…"
-    : aiCandidatesError
-      ? "—"
-      : aiCandidates.length;
-
-  const aiCandidatesDetail = loadingAiCandidates
-    ? "Pobieram kandydatów z Neon"
-    : aiCandidatesError
-      ? "Brak danych kandydatów AI"
-      : "Wykryte przez crawlera i czekające na weryfikację";
-
   const pageStats: StatsCardItem[] = [
-    {
-      label: "Koperty w bazie",
-      value: totalKopertyInVisibleArea,
-      detail: `${osmExactKoperty} dokładnych z OSM + ${userSpots.length} GTK w aktualnym widoku`
-    },
     {
       label: "Odsłony strony",
       value: pageViewsValue,
@@ -426,16 +307,6 @@ export function DashboardHome() {
       label: "Współtwórcy OSM",
       value: osmContributorsValue,
       detail: osmContributorsDetail
-    },
-    {
-      label: "Zestawy zmian OSM",
-      value: osmChangesetsValue,
-      detail: osmChangesetsDetail
-    },
-    {
-      label: "Kraje zmian OSM",
-      value: osmCountriesValue,
-      detail: osmCountriesDetail
     }
   ];
 
@@ -444,30 +315,6 @@ export function DashboardHome() {
       <StatsCards items={pageStats} />
 
       <StatsCards items={osmImpactStats} />
-
-      <Link
-        href="/mapa?widok=gtk-kraj"
-        className="dashboard-ai-candidates-card"
-        aria-label={`Kandydaci AI GTK: ${aiCandidatesValue}. ${aiCandidatesDetail}`}
-      >
-        <div className="dashboard-ai-candidates-main">
-          <span className="dashboard-ai-candidates-badge">AI</span>
-
-          <div>
-            <p className="eyebrow">Kandydaci AI</p>
-            <h2>Kandydaci AI GTK</h2>
-            <p>
-              Crawler wykrył potencjalne koperty na ortofotomapie. Kliknij, aby
-              zobaczyć je na mapie i zweryfikować przed wysłaniem do OSM.
-            </p>
-          </div>
-        </div>
-
-        <div className="dashboard-ai-candidates-counter">
-          <strong>{aiCandidatesValue}</strong>
-          <span>{aiCandidatesDetail}</span>
-        </div>
-      </Link>
 
       <section className="dashboard-map-wide">
         <div className="panel panel-large dashboard-map-panel">
@@ -483,7 +330,7 @@ export function DashboardHome() {
             </div>
 
             <Link href="/mapa" className="text-link">
-              Pełny widok
+              Nawigacja
             </Link>
           </div>
 
@@ -513,7 +360,6 @@ export function DashboardHome() {
               P: {osmParkingWithDisabledCapacity}
             </span>
             <span className="map-status-pill">GTK lokalnie: {userSpots.length}</span>
-            <span className="map-status-pill">AI GTK: {aiCandidates.length}</span>
           </div>
         </div>
 
