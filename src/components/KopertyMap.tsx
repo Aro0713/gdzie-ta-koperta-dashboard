@@ -107,6 +107,13 @@ export type UserAddedSpot = {
   lastConfirmedAt?: string;
 };
 
+export type ExternalUserSpotRequest = {
+  id: string;
+  lat: number;
+  lng: number;
+  source?: "navigation_arrival" | "manual";
+};
+
 export type RouteMapOverlay = {
   route?: {
     type?: string;
@@ -156,6 +163,8 @@ type KopertyMapProps = {
   hideStatusChips?: boolean;
   showRadiusControl?: boolean;
   useViewportRadius?: boolean;
+  externalUserSpotRequest?: ExternalUserSpotRequest | null;
+  onExternalUserSpotRequestHandled?: (id: string) => void;
   onOsmData?: (data: OsmParkingResponse) => void;
   onUserSpotsChange?: (spots: UserAddedSpot[]) => void;
 };
@@ -550,6 +559,8 @@ export function KopertyMap({
   hideStatusChips = false,
   showRadiusControl = true,
   useViewportRadius = false,
+  externalUserSpotRequest = null,
+  onExternalUserSpotRequestHandled,
   onOsmData,
   onUserSpotsChange
 }: KopertyMapProps) {
@@ -567,7 +578,8 @@ export function KopertyMap({
   const userSpotsHydrated = useRef(false);
   const pendingUserSpotPopupId = useRef<string | null>(null);
   const userPosition = useRef<{ lat: number; lng: number } | null>(null);
-
+  const handledExternalUserSpotRequestId = useRef<string | null>(null);
+  
   const programmaticMapMove = useRef(false);
   const navigationControlRef = useRef<NavigationToolbarControl | null>(null);
 
@@ -874,6 +886,30 @@ export function KopertyMap({
     drawUserAddedSpots(userAddedSpots);
     onUserSpotsChange?.(userAddedSpots);
   }, [userAddedSpots, onUserSpotsChange]);
+
+  useEffect(() => {
+  if (!externalUserSpotRequest) {
+    return;
+  }
+
+  if (handledExternalUserSpotRequestId.current === externalUserSpotRequest.id) {
+    return;
+  }
+
+  if (
+    !hasValidCoordinates(
+      externalUserSpotRequest.lat,
+      externalUserSpotRequest.lng
+    )
+  ) {
+    return;
+  }
+
+  handledExternalUserSpotRequestId.current = externalUserSpotRequest.id;
+
+  addUserSpot(externalUserSpotRequest.lat, externalUserSpotRequest.lng);
+  onExternalUserSpotRequestHandled?.(externalUserSpotRequest.id);
+}, [externalUserSpotRequest, onExternalUserSpotRequestHandled]);
 
   useEffect(() => {
     if (!userSpotsHydrated.current) {

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Header } from "@/components/Header";
 import {
   KopertyMap,
+  type ExternalUserSpotRequest,
   type RouteMapOverlay,
   type UserAddedSpot
 } from "@/components/KopertyMap";
@@ -24,6 +25,7 @@ type RouteAssistantResponse = {
   };
   recommendedSpot?: OsmParkingFeature | null;
   alternatives?: OsmParkingFeature[];
+
   route?: RouteMapOverlay["route"];
   routeCoordinates?: RouteMapOverlay["routeCoordinates"];
   routeSummary?: {
@@ -32,7 +34,8 @@ type RouteAssistantResponse = {
     distanceLabel: string;
     durationLabel: string;
   };
-    routeToSpot?: RouteMapOverlay["route"] | null;
+
+  routeToSpot?: RouteMapOverlay["route"] | null;
   routeToSpotCoordinates?: RouteMapOverlay["routeCoordinates"];
   routeToSpotSummary?: {
     distanceMeters: number | null;
@@ -40,6 +43,7 @@ type RouteAssistantResponse = {
     distanceLabel: string;
     durationLabel: string;
   } | null;
+
   routeToDestination?: RouteMapOverlay["route"] | null;
   routeToDestinationCoordinates?: RouteMapOverlay["routeCoordinates"];
   routeToDestinationSummary?: {
@@ -48,8 +52,10 @@ type RouteAssistantResponse = {
     distanceLabel: string;
     durationLabel: string;
   } | null;
+
   spotDistanceToDestinationMeters?: number | null;
   spotDistanceToDestinationLabel?: string;
+
   answer?: string;
   error?: string;
   details?: unknown;
@@ -67,9 +73,6 @@ type NavigationState = {
   accuracyMeters: number | null;
 };
 
-const OFF_ROUTE_THRESHOLD_METERS = 90;
-const ARRIVED_THRESHOLD_METERS = 35;
-const EARTH_RADIUS_METERS = 6371000;
 type GtkSpeechRecognitionAlternative = {
   transcript: string;
   confidence?: number;
@@ -116,6 +119,10 @@ type WindowWithSpeechRecognition = Window & {
   SpeechRecognition?: GtkSpeechRecognitionConstructor;
   webkitSpeechRecognition?: GtkSpeechRecognitionConstructor;
 };
+
+const OFF_ROUTE_THRESHOLD_METERS = 90;
+const ARRIVED_THRESHOLD_METERS = 35;
+const EARTH_RADIUS_METERS = 6371000;
 
 function toRadians(value: number) {
   return (value * Math.PI) / 180;
@@ -382,6 +389,7 @@ function getRouteSummaryForMode(
 
   return result.routeToDestinationSummary || result.routeSummary || null;
 }
+
 export default function MapaPage() {
   const [assistantQuery, setAssistantQuery] = useState("");
   const [userSpots, setUserSpots] = useState<UserAddedSpot[]>([]);
@@ -390,9 +398,13 @@ export default function MapaPage() {
   const [selectedTargetMode, setSelectedTargetMode] =
     useState<NavigationTargetMode | null>(null);
   const [routeOverlay, setRouteOverlay] = useState<RouteMapOverlay | null>(null);
+  const [externalUserSpotRequest, setExternalUserSpotRequest] =
+    useState<ExternalUserSpotRequest | null>(null);
+
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantError, setAssistantError] = useState<string | null>(null);
   const [assistantPanelCollapsed, setAssistantPanelCollapsed] = useState(false);
+
   const [navigationState, setNavigationState] = useState<NavigationState>({
     active: false,
     status: "idle",
@@ -402,11 +414,17 @@ export default function MapaPage() {
     accuracyMeters: null
   });
 
+  const [arrivalSpotPromptVisible, setArrivalSpotPromptVisible] = useState(false);
+
   const navigationWatchId = useRef<number | null>(null);
-  const lastNavigationPosition = useRef<{ lat: number; lng: number } | null>(null);
+  const latestNavigationPosition = useRef<{ lat: number; lng: number } | null>(
+    null
+  );
+  const lastNavigationPosition = useRef<{ lat: number; lng: number } | null>(
+    null
+  );
 
   const speechRecognitionRef = useRef<GtkSpeechRecognitionInstance | null>(null);
-
   const [speechSupported, setSpeechSupported] = useState(false);
   const [speechListening, setSpeechListening] = useState(false);
   const [speechMessage, setSpeechMessage] = useState<string | null>(null);
@@ -425,102 +443,106 @@ export default function MapaPage() {
   }, []);
 
   useEffect(() => {
-  setSpeechSupported(Boolean(getSpeechRecognitionConstructor()));
+    setSpeechSupported(Boolean(getSpeechRecognitionConstructor()));
 
-  return () => {
+    return () => {
+      if (speechRecognitionRef.current) {
+        speechRecognitionRef.current.abort();
+        speechRecognitionRef.current = null;
+      }
+    };
+  }, []);
+
+  function stopVoiceInput() {
     if (speechRecognitionRef.current) {
-      speechRecognitionRef.current.abort();
+      speechRecognitionRef.current.stop();
       speechRecognitionRef.current = null;
     }
-  };
-}, []);
 
-function stopVoiceInput() {
-  if (speechRecognitionRef.current) {
-    speechRecognitionRef.current.stop();
-    speechRecognitionRef.current = null;
-  }
-
-  setSpeechListening(false);
-}
-
-function startVoiceInput() {
-  const SpeechRecognition = getSpeechRecognitionConstructor();
-
-  if (!SpeechRecognition) {
-    setSpeechSupported(false);
-    setSpeechMessage(
-      "Ta przeglądarka nie obsługuje rozpoznawania mowy. Wpisz cel ręcznie."
-    );
-    return;
-  }
-
-  if (speechListening) {
-    stopVoiceInput();
-    return;
-  }
-
-  const recognition = new SpeechRecognition();
-
-  recognition.lang = "pl-PL";
-  recognition.interimResults = true;
-  recognition.continuous = false;
-  recognition.maxAlternatives = 1;
-
-  recognition.onstart = () => {
-    setSpeechListening(true);
-    setSpeechMessage("Słucham. Powiedz cel podróży.");
-  };
-
-  recognition.onend = () => {
     setSpeechListening(false);
-    speechRecognitionRef.current = null;
-  };
+  }
 
-  recognition.onerror = (event) => {
-    setSpeechListening(false);
-    speechRecognitionRef.current = null;
+  function startVoiceInput() {
+    const SpeechRecognition = getSpeechRecognitionConstructor();
 
-    if (event.error === "not-allowed") {
+    if (!SpeechRecognition) {
+      setSpeechSupported(false);
       setSpeechMessage(
-        "Brak zgody na mikrofon. Włącz zgodę w przeglądarce albo wpisz cel ręcznie."
+        "Ta przeglądarka nie obsługuje rozpoznawania mowy. Wpisz cel ręcznie."
       );
       return;
     }
 
-    setSpeechMessage("Nie udało się rozpoznać mowy. Spróbuj ponownie.");
-  };
+    if (speechListening) {
+      stopVoiceInput();
+      return;
+    }
 
-  recognition.onresult = (event) => {
-    let transcript = "";
+    const recognition = new SpeechRecognition();
 
-    for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      const result = event.results[index];
-      const alternative = result[0];
+    recognition.lang = "pl-PL";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
 
-      if (alternative?.transcript) {
-        transcript += alternative.transcript;
+    recognition.onstart = () => {
+      setSpeechListening(true);
+      setSpeechMessage("Słucham. Powiedz cel podróży.");
+    };
+
+    recognition.onend = () => {
+      setSpeechListening(false);
+      speechRecognitionRef.current = null;
+    };
+
+    recognition.onerror = (event) => {
+      setSpeechListening(false);
+      speechRecognitionRef.current = null;
+
+      if (event.error === "not-allowed") {
+        setSpeechMessage(
+          "Brak zgody na mikrofon. Włącz zgodę w przeglądarce albo wpisz cel ręcznie."
+        );
+        return;
       }
+
+      setSpeechMessage("Nie udało się rozpoznać mowy. Spróbuj ponownie.");
+    };
+
+    recognition.onresult = (event) => {
+      let transcript = "";
+
+      for (
+        let index = event.resultIndex;
+        index < event.results.length;
+        index += 1
+      ) {
+        const result = event.results[index];
+        const alternative = result[0];
+
+        if (alternative?.transcript) {
+          transcript += alternative.transcript;
+        }
+      }
+
+      const cleanTranscript = transcript.trim();
+
+      if (cleanTranscript) {
+        setAssistantQuery(cleanTranscript);
+        setSpeechMessage(`Rozpoznano: ${cleanTranscript}`);
+      }
+    };
+
+    speechRecognitionRef.current = recognition;
+
+    try {
+      recognition.start();
+    } catch {
+      speechRecognitionRef.current = null;
+      setSpeechListening(false);
+      setSpeechMessage("Nie udało się uruchomić mikrofonu.");
     }
-
-    const cleanTranscript = transcript.trim();
-
-    if (cleanTranscript) {
-      setAssistantQuery(cleanTranscript);
-      setSpeechMessage(`Rozpoznano: ${cleanTranscript}`);
-    }
-  };
-
-  speechRecognitionRef.current = recognition;
-
-  try {
-    recognition.start();
-  } catch {
-    speechRecognitionRef.current = null;
-    setSpeechListening(false);
-    setSpeechMessage("Nie udało się uruchomić mikrofonu.");
   }
-}
 
   function getCurrentPosition() {
     return new Promise<GeolocationPosition>((resolve, reject) => {
@@ -537,74 +559,102 @@ function startVoiceInput() {
     });
   }
 
+  function getHeadingDegrees(
+    currentPosition: { lat: number; lng: number },
+    nativeHeading: number | null
+  ) {
+    if (
+      typeof nativeHeading === "number" &&
+      Number.isFinite(nativeHeading) &&
+      nativeHeading >= 0
+    ) {
+      return normalizeBearing(nativeHeading);
+    }
+
+    const previousPosition = lastNavigationPosition.current;
+
+    if (!previousPosition) {
+      return null;
+    }
+
+    const movedMeters = distanceMeters(previousPosition, currentPosition);
+
+    if (movedMeters < 3) {
+      return null;
+    }
+
+    return normalizeBearing(bearingDegrees(previousPosition, currentPosition));
+  }
+
   function selectNavigationTarget(mode: NavigationTargetMode) {
-  if (!assistantResult) {
-    return;
+    if (!assistantResult) {
+      return;
+    }
+
+    if (mode === "spot" && !assistantResult.recommendedSpot) {
+      setAssistantError("Brak rekomendowanej koperty przy tym celu.");
+      return;
+    }
+
+    if (navigator.geolocation && navigationWatchId.current !== null) {
+      navigator.geolocation.clearWatch(navigationWatchId.current);
+      navigationWatchId.current = null;
+    }
+
+    setAssistantError(null);
+    setSelectedTargetMode(mode);
+    setAssistantPanelCollapsed(false);
+    setArrivalSpotPromptVisible(false);
+
+    const route = getRouteForMode(assistantResult, mode);
+    const routeCoordinates = getRouteCoordinatesForMode(assistantResult, mode);
+
+    setRouteOverlay({
+      route,
+      routeCoordinates,
+      destination: assistantResult.destination || null,
+      recommendedSpot: assistantResult.recommendedSpot || null,
+      fitMode: "route"
+    });
+
+    setNavigationState({
+      active: false,
+      status: "idle",
+      message:
+        mode === "spot"
+          ? "Wybrano prowadzenie do koperty. Możesz uruchomić nawigację."
+          : "Wybrano prowadzenie pod wskazany adres. Możesz uruchomić nawigację.",
+      remainingMeters: null,
+      distanceToRouteMeters: null,
+      accuracyMeters: null
+    });
   }
 
-  if (mode === "spot" && !assistantResult.recommendedSpot) {
-    setAssistantError("Brak rekomendowanej koperty przy tym celu.");
-    return;
-  }
+  function getNavigationTarget(result = assistantResult) {
+    if (!result || !selectedTargetMode) {
+      return null;
+    }
 
-  if (navigator.geolocation && navigationWatchId.current !== null) {
-    navigator.geolocation.clearWatch(navigationWatchId.current);
-    navigationWatchId.current = null;
-  }
+    if (selectedTargetMode === "spot") {
+      return getFeatureLatLng(result.recommendedSpot);
+    }
 
-  setAssistantError(null);
-  setSelectedTargetMode(mode);
-  setAssistantPanelCollapsed(false);
+    if (selectedTargetMode === "destination" && result.destination) {
+      return {
+        lat: result.destination.lat,
+        lng: result.destination.lng
+      };
+    }
 
-  const route = getRouteForMode(assistantResult, mode);
-  const routeCoordinates = getRouteCoordinatesForMode(assistantResult, mode);
-
-  setRouteOverlay({
-    route,
-    routeCoordinates,
-    destination: assistantResult.destination || null,
-    recommendedSpot: assistantResult.recommendedSpot || null,
-    fitMode: "route"
-  });
-
-  setNavigationState({
-    active: false,
-    status: "idle",
-    message:
-      mode === "spot"
-        ? "Wybrano prowadzenie do koperty. Możesz uruchomić nawigację."
-        : "Wybrano prowadzenie pod wskazany adres. Możesz uruchomić nawigację.",
-    remainingMeters: null,
-    distanceToRouteMeters: null,
-    accuracyMeters: null
-  });
-}
-
-function getNavigationTarget(result = assistantResult) {
-  if (!result || !selectedTargetMode) {
     return null;
   }
-
-  if (selectedTargetMode === "spot") {
-    return getFeatureLatLng(result.recommendedSpot);
-  }
-
-  if (selectedTargetMode === "destination" && result.destination) {
-    return {
-      lat: result.destination.lat,
-      lng: result.destination.lng
-    };
-  }
-
-  return null;
-}
 
   function updateNavigationFromPosition(position: GeolocationPosition) {
     if (!assistantResult) {
       return;
     }
 
-   const basePosition = {
+    const basePosition = {
       lat: position.coords.latitude,
       lng: position.coords.longitude
     };
@@ -620,6 +670,11 @@ function getNavigationTarget(result = assistantResult) {
         ? position.coords.accuracy
         : null,
       headingDegrees
+    };
+
+    latestNavigationPosition.current = {
+      lat: currentPosition.lat,
+      lng: currentPosition.lng
     };
 
     lastNavigationPosition.current = basePosition;
@@ -642,11 +697,17 @@ function getNavigationTarget(result = assistantResult) {
     );
 
     let status: NavigationStatus = "on_route";
-    let message = "Prowadzę do rekomendowanego miejsca postoju.";
+    let message =
+      selectedTargetMode === "destination"
+        ? "Prowadzę pod wskazany adres."
+        : "Prowadzę do rekomendowanego miejsca postoju.";
 
     if (remainingMeters !== null && remainingMeters <= ARRIVED_THRESHOLD_METERS) {
       status = "arrived";
-      message = "Jesteś przy rekomendowanej kopercie.";
+      message =
+        selectedTargetMode === "destination"
+          ? "Jesteś pod wskazanym adresem. Sprawdź, czy jest tu koperta."
+          : "Jesteś przy rekomendowanej kopercie.";
     } else if (
       routeDistanceMeters !== null &&
       routeDistanceMeters > OFF_ROUTE_THRESHOLD_METERS
@@ -654,6 +715,10 @@ function getNavigationTarget(result = assistantResult) {
       status = "off_route";
       message = "Jesteś poza trasą. Przelicz trasę z aktualnej pozycji.";
     }
+
+    setArrivalSpotPromptVisible(
+      status === "arrived" && selectedTargetMode === "destination"
+    );
 
     setNavigationState({
       active: true,
@@ -664,7 +729,7 @@ function getNavigationTarget(result = assistantResult) {
       accuracyMeters: currentPosition.accuracyMeters
     });
 
-   setRouteOverlay({
+    setRouteOverlay({
       route: activeRoute,
       routeCoordinates: activeRouteCoordinates,
       destination: assistantResult.destination || null,
@@ -675,38 +740,12 @@ function getNavigationTarget(result = assistantResult) {
     });
   }
 
-  function getHeadingDegrees(
-  currentPosition: { lat: number; lng: number },
-  nativeHeading: number | null
-) {
-  if (
-    typeof nativeHeading === "number" &&
-    Number.isFinite(nativeHeading) &&
-    nativeHeading >= 0
-  ) {
-    return normalizeBearing(nativeHeading);
-  }
-
-  const previousPosition = lastNavigationPosition.current;
-
-  if (!previousPosition) {
-    return null;
-  }
-
-  const movedMeters = distanceMeters(previousPosition, currentPosition);
-
-  if (movedMeters < 3) {
-    return null;
-  }
-
-  return normalizeBearing(bearingDegrees(previousPosition, currentPosition));
-}
-
   function stopNavigation() {
     if (navigator.geolocation && navigationWatchId.current !== null) {
       navigator.geolocation.clearWatch(navigationWatchId.current);
       navigationWatchId.current = null;
     }
+
     lastNavigationPosition.current = null;
 
     setNavigationState((current) => ({
@@ -715,9 +754,11 @@ function getNavigationTarget(result = assistantResult) {
       status: "idle",
       message: "Nawigacja została zatrzymana."
     }));
+
+    setArrivalSpotPromptVisible(false);
     setAssistantPanelCollapsed(false);
 
-   if (assistantResult) {
+    if (assistantResult) {
       setRouteOverlay({
         route: getRouteForMode(assistantResult, selectedTargetMode),
         routeCoordinates: getRouteCoordinatesForMode(
@@ -758,25 +799,27 @@ function getNavigationTarget(result = assistantResult) {
     }
 
     setAssistantError(null);
+    setArrivalSpotPromptVisible(false);
 
     try {
       const firstPosition = await getCurrentPosition();
+
       updateNavigationFromPosition(firstPosition);
       setAssistantPanelCollapsed(true);
 
-    navigationWatchId.current = navigator.geolocation.watchPosition(
-      updateNavigationFromPosition,
-      () => {
-        setAssistantError(
-          "Nie mogę odświeżyć lokalizacji. Sprawdź zgodę przeglądarki."
-        );
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 12000,
-        maximumAge: 0
-      }
-    );
+      navigationWatchId.current = navigator.geolocation.watchPosition(
+        updateNavigationFromPosition,
+        () => {
+          setAssistantError(
+            "Nie mogę odświeżyć lokalizacji. Sprawdź zgodę przeglądarki."
+          );
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 12000,
+          maximumAge: 0
+        }
+      );
     } catch (error) {
       const message =
         error instanceof Error
@@ -785,6 +828,38 @@ function getNavigationTarget(result = assistantResult) {
 
       setAssistantError(message);
     }
+  }
+
+  function markEnvelopeAtCurrentLocation() {
+    const position =
+      latestNavigationPosition.current ||
+      getNavigationTarget(assistantResult) ||
+      (assistantResult?.destination
+        ? {
+            lat: assistantResult.destination.lat,
+            lng: assistantResult.destination.lng
+          }
+        : null);
+
+    if (!position) {
+      setAssistantError("Nie mam lokalizacji, w której można oznaczyć kopertę.");
+      return;
+    }
+
+    setExternalUserSpotRequest({
+      id: `navigation-arrival-${Date.now()}`,
+      lat: position.lat,
+      lng: position.lng,
+      source: "navigation_arrival"
+    });
+
+    setArrivalSpotPromptVisible(false);
+
+    setNavigationState((current) => ({
+      ...current,
+      message:
+        "Dodałem lokalny szkic koperty. Możesz go doprecyzować na mapie i wysłać do OSM."
+    }));
   }
 
   async function submitRouteAssistant() {
@@ -797,8 +872,9 @@ function getNavigationTarget(result = assistantResult) {
 
     stopNavigation();
     stopVoiceInput();
-    setAssistantPanelCollapsed(false);
 
+    setAssistantPanelCollapsed(false);
+    setArrivalSpotPromptVisible(false);
     setAssistantLoading(true);
     setAssistantError(null);
     setAssistantResult(null);
@@ -837,33 +913,33 @@ function getNavigationTarget(result = assistantResult) {
 
       setAssistantResult(data);
 
-    if (data.recommendedSpot) {
-      setRouteOverlay({
-        route: null,
-        routeCoordinates: null,
-        destination: data.destination || null,
-        recommendedSpot: data.recommendedSpot || null,
-        fitMode: "route"
-      });
-    } else {
-      setSelectedTargetMode("destination");
+      if (data.recommendedSpot) {
+        setRouteOverlay({
+          route: null,
+          routeCoordinates: null,
+          destination: data.destination || null,
+          recommendedSpot: data.recommendedSpot || null,
+          fitMode: "route"
+        });
+      } else {
+        setSelectedTargetMode("destination");
 
-      setRouteOverlay({
-        route: data.routeToDestination || data.route || null,
-        routeCoordinates:
-          data.routeToDestinationCoordinates || data.routeCoordinates || null,
-        destination: data.destination || null,
-        recommendedSpot: null,
-        fitMode: "route"
-      });
-    }
+        setRouteOverlay({
+          route: data.routeToDestination || data.route || null,
+          routeCoordinates:
+            data.routeToDestinationCoordinates || data.routeCoordinates || null,
+          destination: data.destination || null,
+          recommendedSpot: null,
+          fitMode: "route"
+        });
+      }
 
       setNavigationState({
         active: false,
         status: "idle",
         message: data.recommendedSpot
-        ? "Wybierz, czy prowadzić do koperty, czy pod wskazany adres."
-        : "Trasa pod wskazany adres jest gotowa.",
+          ? "Wybierz, czy prowadzić do koperty, czy pod wskazany adres."
+          : "Trasa pod wskazany adres jest gotowa.",
         remainingMeters: null,
         distanceToRouteMeters: null,
         accuracyMeters: null
@@ -894,25 +970,48 @@ function getNavigationTarget(result = assistantResult) {
   const spotRouteSummary =
     assistantResult?.routeToSpotSummary || assistantResult?.routeSummary;
 
+  const navigationDistanceLabel =
+    selectedTargetMode === "destination" ? "Do celu" : "Do koperty";
+
+  const navigationPanelTitle =
+    selectedTargetMode === "destination"
+      ? "Prowadzenie pod adres"
+      : selectedTargetMode === "spot"
+        ? "Prowadzenie do koperty"
+        : "Wybierz sposób prowadzenia";
+
+  const canStartNavigation = Boolean(
+    assistantResult &&
+      selectedTargetMode &&
+      (selectedTargetMode === "destination" || assistantResult.recommendedSpot)
+  );
+
   return (
     <main className="page-shell page-shell-navigation">
       <Header />
 
       <section className="navigation-map-section" aria-label="Mapa nawigacji">
         <div className="navigation-map-card">
-        <KopertyMap
+          <KopertyMap
             full
             routeOverlay={routeOverlay}
             useViewportRadius
             showRadiusControl={false}
             hideStatusChips
+            onUserSpotsChange={setUserSpots}
+            externalUserSpotRequest={externalUserSpotRequest}
+            onExternalUserSpotRequestHandled={(id) => {
+              if (externalUserSpotRequest?.id === id) {
+                setExternalUserSpotRequest(null);
+              }
+            }}
             navigationControl={
               assistantResult && (assistantPanelCollapsed || navigationState.active)
                 ? {
                     active: true,
                     remainingLabel: navigationState.active
                       ? formatNavigationDistance(navigationState.remainingMeters)
-                      : assistantResult.routeSummary?.distanceLabel,
+                      : selectedRouteSummary?.distanceLabel,
                     statusLabel: navigationState.active
                       ? navigationState.message
                       : "Pokaż panel asystenta dojazdu",
@@ -924,11 +1023,11 @@ function getNavigationTarget(result = assistantResult) {
             }
           />
 
-           <div
-              className={`route-assistant-mapbar ${
-                assistantResult ? "route-assistant-mapbar-expanded" : ""
-              } ${assistantPanelCollapsed ? "route-assistant-mapbar-collapsed" : ""}`}
-            >
+          <div
+            className={`route-assistant-mapbar ${
+              assistantResult ? "route-assistant-mapbar-expanded" : ""
+            } ${assistantPanelCollapsed ? "route-assistant-mapbar-collapsed" : ""}`}
+          >
             <form
               className="route-assistant-mapbar-form"
               onSubmit={(event) => {
@@ -939,59 +1038,59 @@ function getNavigationTarget(result = assistantResult) {
               <label htmlFor="route-assistant-query">Cel podróży</label>
 
               <div className="route-assistant-mapbar-row">
-              <div className="route-assistant-mapbar-input-wrap">
-                <input
-                  id="route-assistant-query"
-                  value={assistantQuery}
-                  onChange={(event) => {
-                    setAssistantQuery(event.target.value);
-                    setSpeechMessage(null);
-                  }}
-                  placeholder="Dokąd jedziesz?"
-                  type="text"
-                />
+                <div className="route-assistant-mapbar-input-wrap">
+                  <input
+                    id="route-assistant-query"
+                    value={assistantQuery}
+                    onChange={(event) => {
+                      setAssistantQuery(event.target.value);
+                      setSpeechMessage(null);
+                    }}
+                    placeholder="Dokąd jedziesz?"
+                    type="text"
+                  />
+
+                  <button
+                    type="button"
+                    className={`route-assistant-mic-button ${
+                      speechListening ? "route-assistant-mic-button-active" : ""
+                    }`}
+                    onClick={speechListening ? stopVoiceInput : startVoiceInput}
+                    disabled={!speechSupported || assistantLoading}
+                    aria-label={
+                      speechListening
+                        ? "Zatrzymaj rozpoznawanie mowy"
+                        : "Powiedz cel podróży"
+                    }
+                    title={
+                      speechSupported
+                        ? "Powiedz cel podróży"
+                        : "Ta przeglądarka nie obsługuje rozpoznawania mowy"
+                    }
+                  >
+                    {speechListening ? "■" : "🎙"}
+                  </button>
+                </div>
 
                 <button
-                  type="button"
-                  className={`route-assistant-mic-button ${
-                    speechListening ? "route-assistant-mic-button-active" : ""
-                  }`}
-                  onClick={speechListening ? stopVoiceInput : startVoiceInput}
-                  disabled={!speechSupported || assistantLoading}
-                  aria-label={
-                    speechListening
-                      ? "Zatrzymaj rozpoznawanie mowy"
-                      : "Powiedz cel podróży"
-                  }
-                  title={
-                    speechSupported
-                      ? "Powiedz cel podróży"
-                      : "Ta przeglądarka nie obsługuje rozpoznawania mowy"
-                  }
+                  type="submit"
+                  className="route-assistant-mapbar-submit"
+                  disabled={assistantLoading}
                 >
-                  {speechListening ? "■" : "🎙"}
+                  {assistantLoading ? "Szukam…" : "Pokaż"}
                 </button>
               </div>
-
-              <button
-                type="submit"
-                className="route-assistant-mapbar-submit"
-                disabled={assistantLoading}
-              >
-                {assistantLoading ? "Szukam…" : "Pokaż"}
-              </button>
-            </div>
             </form>
 
             {speechMessage ? (
-            <div
-              className={`route-assistant-voice-hint ${
-                speechListening ? "route-assistant-voice-hint-active" : ""
-              }`}
-            >
-              {speechMessage}
-            </div>
-          ) : null}
+              <div
+                className={`route-assistant-voice-hint ${
+                  speechListening ? "route-assistant-voice-hint-active" : ""
+                }`}
+              >
+                {speechMessage}
+              </div>
+            ) : null}
 
             {assistantError ? (
               <div className="route-assistant-mapbar-error">
@@ -1006,83 +1105,84 @@ function getNavigationTarget(result = assistantResult) {
                     <span>Rekomendacja</span>
                     <strong>
                       {assistantResult.recommendedSpot
-                        ? "Prowadzenie do koperty"
+                        ? "Wybierz trasę"
                         : "Trasa do celu"}
                     </strong>
                   </div>
 
                   <div className="route-assistant-mapbar-result-actions">
                     {selectedRouteSummary ? (
-                  <div className="route-assistant-mapbar-summary">
-                    <span>{selectedRouteSummary.durationLabel}</span>
-                    <strong>{selectedRouteSummary.distanceLabel}</strong>
-                  </div>
-                ) : null}
+                      <div className="route-assistant-mapbar-summary">
+                        <span>{selectedRouteSummary.durationLabel}</span>
+                        <strong>{selectedRouteSummary.distanceLabel}</strong>
+                      </div>
+                    ) : null}
 
-                 <button
-                    type="button"
-                    className="route-assistant-mapbar-collapse"
-                    onClick={() => setAssistantPanelCollapsed(true)}
-                  >
-                    Zwiń
-                  </button>
+                    <button
+                      type="button"
+                      className="route-assistant-mapbar-collapse"
+                      onClick={() => setAssistantPanelCollapsed(true)}
+                    >
+                      Zwiń
+                    </button>
                   </div>
                 </div>
 
-                {assistantResult.answer ? (
-                  <p>{assistantResult.answer}</p>
-                ) : null}
+                {assistantResult.answer ? <p>{assistantResult.answer}</p> : null}
 
-              <div className="route-target-choice">
-                {assistantResult.recommendedSpot ? (
+                <div className="route-target-choice">
+                  {assistantResult.recommendedSpot ? (
+                    <button
+                      type="button"
+                      className={`route-target-choice-button ${
+                        selectedTargetMode === "spot"
+                          ? "route-target-choice-button-active"
+                          : ""
+                      }`}
+                      onClick={() => selectNavigationTarget("spot")}
+                    >
+                      <span>Nawiguj do koperty</span>
+                      <strong>
+                        {assistantResult.spotDistanceToDestinationLabel
+                          ? `Koperta ${assistantResult.spotDistanceToDestinationLabel} od celu`
+                          : "Najbliższe miejsce postoju"}
+                      </strong>
+                      {spotRouteSummary ? (
+                        <small>
+                          {spotRouteSummary.durationLabel} ·{" "}
+                          {spotRouteSummary.distanceLabel}
+                        </small>
+                      ) : null}
+                    </button>
+                  ) : null}
+
                   <button
                     type="button"
                     className={`route-target-choice-button ${
-                      selectedTargetMode === "spot" ? "route-target-choice-button-active" : ""
+                      selectedTargetMode === "destination"
+                        ? "route-target-choice-button-active"
+                        : ""
                     }`}
-                    onClick={() => selectNavigationTarget("spot")}
+                    onClick={() => selectNavigationTarget("destination")}
                   >
-                    <span>Nawiguj do koperty</span>
-                    <strong>
-                      {assistantResult.spotDistanceToDestinationLabel
-                        ? `Koperta ${assistantResult.spotDistanceToDestinationLabel} od celu`
-                        : "Najbliższe miejsce postoju"}
-                    </strong>
-                    {spotRouteSummary ? (
+                    <span>Nawiguj pod adres</span>
+                    <strong>Jedź bezpośrednio do celu</strong>
+                    {destinationRouteSummary ? (
                       <small>
-                        {spotRouteSummary.durationLabel} · {spotRouteSummary.distanceLabel}
+                        {destinationRouteSummary.durationLabel} ·{" "}
+                        {destinationRouteSummary.distanceLabel}
                       </small>
                     ) : null}
                   </button>
-                ) : null}
-
-                <button
-                  type="button"
-                  className={`route-target-choice-button ${
-                    selectedTargetMode === "destination"
-                      ? "route-target-choice-button-active"
-                      : ""
-                  }`}
-                  onClick={() => selectNavigationTarget("destination")}
-                >
-                  <span>Nawiguj pod adres</span>
-                  <strong>Jedź bezpośrednio do celu</strong>
-                  {destinationRouteSummary ? (
-                    <small>
-                      {destinationRouteSummary.durationLabel} ·{" "}
-                      {destinationRouteSummary.distanceLabel}
-                    </small>
-                  ) : null}
-                </button>
-              </div>
+                </div>
 
                 <div className="route-navigation-panel route-navigation-panel-compact">
-                  <strong>Prowadzenie</strong>
+                  <strong>{navigationPanelTitle}</strong>
                   <p>{navigationState.message}</p>
 
                   <div className="route-assistant-meta">
                     <span>
-                      Do koperty:{" "}
+                      {navigationDistanceLabel}:{" "}
                       {formatNavigationDistance(navigationState.remainingMeters)}
                     </span>
                     <span>
@@ -1099,7 +1199,7 @@ function getNavigationTarget(result = assistantResult) {
                         type="button"
                         className="route-navigation-primary"
                         onClick={() => void startNavigation()}
-                        disabled={!assistantResult.recommendedSpot}
+                        disabled={!canStartNavigation}
                       >
                         Nawiguj
                       </button>
@@ -1123,6 +1223,35 @@ function getNavigationTarget(result = assistantResult) {
                       </button>
                     ) : null}
                   </div>
+
+                  {arrivalSpotPromptVisible ? (
+                    <div className="route-arrival-spot-prompt">
+                      <strong>Czy przy tym celu jest koperta?</strong>
+                      <p>
+                        Jeśli widzisz oznaczone miejsce parkingowe dla OzN,
+                        możesz dodać lokalny szkic i później wysłać go do
+                        OpenStreetMap.
+                      </p>
+
+                      <div className="route-arrival-spot-actions">
+                        <button
+                          type="button"
+                          className="route-navigation-primary"
+                          onClick={markEnvelopeAtCurrentLocation}
+                        >
+                          Tak, oznacz kopertę
+                        </button>
+
+                        <button
+                          type="button"
+                          className="route-navigation-secondary"
+                          onClick={() => setArrivalSpotPromptVisible(false)}
+                        >
+                          Nie teraz
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 {recommendedProperties ? (
@@ -1136,7 +1265,9 @@ function getNavigationTarget(result = assistantResult) {
                     </div>
 
                     <div className="route-assistant-mapbar-spot-meta">
-                      <span>{formatMeters(recommendedProperties.distanceMeters)}</span>
+                      <span>
+                        {formatMeters(recommendedProperties.distanceMeters)}
+                      </span>
                       <span>
                         nawierzchnia:{" "}
                         {recommendedProperties.surface || "brak danych"}

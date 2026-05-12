@@ -3964,3 +3964,41 @@ textarea {
   color: #ffffff;
   background: #1477d4;
 }
+/* --- GTK: destination arrival prompt --- */
+
+.route-arrival-spot-prompt {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 11px;
+  border: 1px solid rgba(22, 163, 74, 0.22);
+  border-radius: 16px;
+  background: rgba(22, 163, 74, 0.08);
+}
+
+.route-arrival-spot-prompt strong {
+  color: #14532d;
+  font-size: 0.84rem;
+  font-weight: 1000;
+}
+
+.route-arrival-spot-prompt p {
+  margin: 0;
+  color: #1f3f2a;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.route-arrival-spot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.route-arrival-spot-actions .route-navigation-primary,
+.route-arrival-spot-actions .route-navigation-secondary {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 0.78rem;
+}
