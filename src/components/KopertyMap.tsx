@@ -477,7 +477,7 @@ function buildUserSpotPopupHtml(
         ${
           isSubmitted
             ? "Koperta jest już w OSM. W GTK pojawi się jako dane OSM po następnym syncu snapshotu."
-            : "Ten punkt jest zapisany tylko lokalnie w tej przeglądarce. Wyślij go do OSM, żeby inni mogli go zobaczyć po następnym syncu."
+            : "Ten punkt jest zapisany tylko lokalnie w tej przeglądarce. Kliknij „Wyślij do OSM”, żeby utworzyć wpis w OpenStreetMap."
         }
       </span>
     </div>
@@ -1780,7 +1780,7 @@ export function KopertyMap({
     void fetchOsmParking(position.lat, position.lng, safeRadius);
   }
 
-  function addUserSpot(lat: number, lng: number) {
+    function addUserSpot(lat: number, lng: number) {
     const newSpot: UserAddedSpot = {
       id: createLocalId(),
       lat,
@@ -1792,13 +1792,13 @@ export function KopertyMap({
       addedByOsmId: osmUser?.id
     };
 
-    pendingUserSpotPopupId.current = null;
+    pendingUserSpotPopupId.current = newSpot.id;
     setShowRemoveChooser(false);
     setEditingSpotId(null);
     setUserAddedSpots((current) => [newSpot, ...current]);
 
     setLocationMessage(
-      "Dodano szkic koperty lokalnie. Punkt jest zapisany tylko w tej przeglądarce i czeka na wysłanie do OSM."
+      "Dodano lokalny szkic koperty. To nie jest jeszcze wpis w OpenStreetMap. W otwartym popupie wybierz „Wyślij do OSM”, żeby zapisać kopertę w OSM."
     );
   }
 
