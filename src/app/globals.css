@@ -4002,3 +4002,40 @@ textarea {
   padding: 0 12px;
   font-size: 0.78rem;
 }
+/* --- GTK: markers from central OSM submission registry --- */
+
+.gtk-registry-marker {
+  display: grid !important;
+  width: 44px !important;
+  height: 44px !important;
+  place-items: center !important;
+  border: 3px solid #ffffff !important;
+  border-radius: 999px !important;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #1477d4, #16a34a) !important;
+  box-shadow:
+    0 14px 32px rgba(20, 119, 212, 0.34),
+    0 0 0 6px rgba(22, 163, 74, 0.16) !important;
+}
+
+.gtk-registry-marker span {
+  display: grid !important;
+  width: 24px !important;
+  height: 24px !important;
+  place-items: center !important;
+  font-size: 1rem !important;
+  line-height: 1 !important;
+  font-weight: 1000 !important;
+}
+
+.gtk-registry-marker small {
+  display: block !important;
+  margin-top: -8px !important;
+  padding: 1px 5px !important;
+  border-radius: 999px !important;
+  color: #14532d !important;
+  background: #ffffff !important;
+  font-size: 0.48rem !important;
+  line-height: 1.1 !important;
+  font-weight: 1000 !important;
+}

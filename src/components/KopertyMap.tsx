@@ -353,8 +353,47 @@ function getViewportRadiusMeters(
 
   return clampRadius(Math.ceil(maxDistance / 100) * 100);
 }
+function isGtkRegistryProperties(properties?: OsmParkingProperties | null) {
+  const typedProperties = properties as
+    | (OsmParkingProperties & {
+        source?: string | null;
+        sourceStatus?: string | null;
+        tags?: Record<string, string>;
+      })
+    | null
+    | undefined;
+
+  const tags = typedProperties?.tags || {};
+
+  const candidates = [
+    typedProperties?.source,
+    typedProperties?.sourceStatus,
+    tags["source:registry"],
+    tags["survey:tool"],
+    tags["source:application"],
+    tags["created_by"],
+    tags["created_by:app"]
+  ];
+
+  return candidates.some((value) => {
+    return (
+      typeof value === "string" &&
+      /gtk|gdzietakoperta|gdzie\s*ta\s*koperta/i.test(value)
+    );
+  });
+}
+
+function isGtkRegistryFeature(feature: OsmParkingFeature) {
+  return isGtkRegistryProperties(feature.properties || null);
+}
 function buildPopupHtml(properties: OsmParkingProperties) {
-  const title = getOsmTitle(properties);
+  const isGtkRegistry = isGtkRegistryProperties(properties);
+  const title = isGtkRegistry
+    ? "Koperta GTK z OpenStreetMap"
+    : getOsmTitle(properties);
+  const subtitle = isGtkRegistry
+    ? "Dodana przez użytkownika GTK i zapisana w OSM"
+    : formatObjectType(properties.objectType);
   const capacityDisabled = properties.capacityDisabled || "brak danych";
   const parkingSpace = properties.parkingSpace || "brak danych";
   const surface = properties.surface || "brak danych";
@@ -364,7 +403,7 @@ function buildPopupHtml(properties: OsmParkingProperties) {
   return `
     <div class="osm-popup">
       <strong>${escapeHtml(title)}</strong>
-      <span>${escapeHtml(formatObjectType(properties.objectType))}</span>
+      <span>${escapeHtml(subtitle)}</span>
       <dl>
         <dt>Odległość</dt>
         <dd>${escapeHtml(formatMeters(properties.distanceMeters))}</dd>
@@ -1247,21 +1286,26 @@ export function KopertyMap({
     const lat = coordinates[1];
 
     const objectType = feature.properties?.objectType;
+    const isGtkRegistry = isGtkRegistryFeature(feature);
 
-    const markerClass =
-      objectType === "disabled_parking_space"
+    const markerClass = isGtkRegistry
+      ? "osm-marker gtk-registry-marker"
+      : objectType === "disabled_parking_space"
         ? "osm-marker osm-marker-space"
         : objectType === "parking_with_disabled_capacity"
           ? "osm-marker osm-marker-parking"
           : "osm-marker osm-marker-default";
 
-    const markerLabel = objectType === "disabled_parking_space" ? "♿" : "P";
+    const markerLabel =
+      objectType === "disabled_parking_space" || isGtkRegistry ? "♿" : "P";
 
     const icon = L.divIcon({
       className: markerClass,
-      html: `<span>${markerLabel}</span>`,
-      iconSize: [34, 34],
-      iconAnchor: [17, 17],
+      html: isGtkRegistry
+        ? `<span>${markerLabel}</span><small>GTK</small>`
+        : `<span>${markerLabel}</span>`,
+      iconSize: isGtkRegistry ? [44, 44] : [34, 34],
+      iconAnchor: isGtkRegistry ? [22, 22] : [17, 17],
       popupAnchor: [0, -14]
     });
 
