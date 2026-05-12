@@ -2,6 +2,7 @@
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import type { Feature, FeatureCollection, Point } from "geojson";
+import { sql } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +42,22 @@ type SnapshotMetadata = {
   count?: number;
   exactDisabledParkingSpaces?: number;
   parkingsWithDisabledCapacity?: number;
+};
+
+type GtkSubmissionRow = {
+  id: string;
+  source_type: string | null;
+  local_spot_id: string | null;
+  submitted_by_osm_id: number | null;
+  submitted_by_name: string | null;
+  osm_type: string | null;
+  osm_id: number | string | null;
+  osm_changeset_id: number | string | null;
+  osm_url: string | null;
+  lat: number | string | null;
+  lng: number | string | null;
+  submitted_at: string | null;
+  status: string | null;
 };
 
 let cachedSnapshot: SnapshotCollection | null = null;
@@ -133,7 +150,11 @@ async function loadSnapshot() {
   const raw = await readFile(filePath, "utf-8");
   const parsed = JSON.parse(raw) as SnapshotCollection;
 
-  if (!parsed || parsed.type !== "FeatureCollection" || !Array.isArray(parsed.features)) {
+  if (
+    !parsed ||
+    parsed.type !== "FeatureCollection" ||
+    !Array.isArray(parsed.features)
+  ) {
     throw new Error("Invalid disabled-parking.geojson snapshot");
   }
 
@@ -225,6 +246,7 @@ function countByType(features: SnapshotFeature[]) {
     parkingsWithDisabledCapacity
   };
 }
+
 const DEFINITELY_NON_PUBLIC_ACCESS_VALUES = new Set([
   "private",
   "no",
@@ -308,6 +330,7 @@ function filterDisplayableFeatures(features: SnapshotFeature[]) {
     return !areasWithExactDisabledSpaces.has(areaId);
   });
 }
+
 function isGtkFeature(feature: SnapshotFeature) {
   const tags = feature.properties?.tags || {};
 
@@ -332,6 +355,151 @@ function isGtkFeature(feature: SnapshotFeature) {
 function hasValidPointGeometry(feature: SnapshotFeature) {
   return Boolean(getFeatureLatLng(feature));
 }
+
+function formatDateOnly(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
+function gtkSubmissionToFeature(row: GtkSubmissionRow): SnapshotFeature | null {
+  const lat = Number(row.lat);
+  const lng = Number(row.lng);
+  const osmId = Number(row.osm_id);
+  const osmType = String(row.osm_type || "node");
+
+  if (!isValidLatLng(lat, lng) || !Number.isFinite(osmId)) {
+    return null;
+  }
+
+  const osmUrl =
+    row.osm_url || `https://www.openstreetmap.org/${osmType}/${osmId}`;
+  const checkDate = formatDateOnly(row.submitted_at);
+
+  return {
+    type: "Feature",
+    geometry: {
+      type: "Point",
+      coordinates: [lng, lat]
+    },
+    properties: {
+      source: "gdzietakoperta",
+      sourceStatus: "gtk_osm_submissions",
+      objectType: "disabled_parking_space",
+      osmType,
+      osmId,
+      osmUrl,
+      name: null,
+      amenity: "parking_space",
+      parking: null,
+      parkingSpace: "disabled",
+      capacity: null,
+      capacityDisabled: "1",
+      access: null,
+      wheelchair: null,
+      surface: null,
+      operator: null,
+      areaId: undefined,
+      areaName: undefined,
+      syncedAt: row.submitted_at || undefined,
+      originalGeometryType: "Point",
+      tags: {
+        amenity: "parking_space",
+        parking_space: "disabled",
+        ...(checkDate ? { check_date: checkDate } : {}),
+        "source:registry": "GdzieTaKoperta",
+        "gtk:submitted_by": row.submitted_by_name || "",
+        "gtk:source_type": row.source_type || "manual"
+      }
+    }
+  };
+}
+
+async function loadGtkSubmissionFeatures() {
+  try {
+    const rows = (await sql`
+      SELECT
+        id::text,
+        source_type,
+        local_spot_id,
+        submitted_by_osm_id,
+        submitted_by_name,
+        osm_type,
+        osm_id::bigint,
+        osm_changeset_id::bigint,
+        osm_url,
+        lat::float,
+        lng::float,
+        submitted_at::text,
+        status
+      FROM gtk_osm_submissions
+      WHERE
+        status = 'submitted_to_osm'
+        AND osm_type IS NOT NULL
+        AND osm_id IS NOT NULL
+        AND lat IS NOT NULL
+        AND lng IS NOT NULL
+      ORDER BY submitted_at DESC
+    `) as GtkSubmissionRow[];
+
+    return rows
+      .map(gtkSubmissionToFeature)
+      .filter((feature): feature is SnapshotFeature => Boolean(feature));
+  } catch (error) {
+    console.error("[api/osm/parking] Failed to load GTK registry features", {
+      error
+    });
+
+    return [];
+  }
+}
+
+function getDedupeKey(feature: SnapshotFeature) {
+  const properties = feature.properties || {};
+  const osmType = properties.osmType ? String(properties.osmType) : null;
+  const osmId =
+    properties.osmId !== undefined && properties.osmId !== null
+      ? String(properties.osmId)
+      : null;
+
+  if (osmType && osmId) {
+    return `${osmType}:${osmId}`;
+  }
+
+  const position = getFeatureLatLng(feature);
+
+  if (position) {
+    return `point:${position.lat.toFixed(7)}:${position.lng.toFixed(7)}`;
+  }
+
+  return JSON.stringify(feature.geometry);
+}
+
+function mergeSnapshotAndGtkRegistryFeatures(
+  snapshotFeatures: SnapshotFeature[],
+  gtkRegistryFeatures: SnapshotFeature[]
+) {
+  const byKey = new Map<string, SnapshotFeature>();
+
+  for (const feature of snapshotFeatures) {
+    byKey.set(getDedupeKey(feature), feature);
+  }
+
+  for (const feature of gtkRegistryFeatures) {
+    byKey.set(getDedupeKey(feature), feature);
+  }
+
+  return Array.from(byKey.values());
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
@@ -339,16 +507,21 @@ export async function GET(request: NextRequest) {
     const scope = searchParams.get("scope");
     const sourceFilter = searchParams.get("source");
 
-    const [snapshot, snapshotMetadata] = await Promise.all([
+    const [snapshot, snapshotMetadata, gtkRegistryFeatures] = await Promise.all([
       loadSnapshot(),
-      loadSnapshotMetadata()
+      loadSnapshotMetadata(),
+      loadGtkSubmissionFeatures()
     ]);
-    const displayableSnapshotFeatures = filterDisplayableFeatures(
-      snapshot.features
+
+    const mergedFeatures = mergeSnapshotAndGtkRegistryFeatures(
+      snapshot.features,
+      gtkRegistryFeatures
     );
 
+    const displayableFeatures = filterDisplayableFeatures(mergedFeatures);
+
     if (scope === "country") {
-      const countryFeatures = displayableSnapshotFeatures
+      const countryFeatures = displayableFeatures
         .filter((feature): feature is SnapshotFeature => {
           if (!hasValidPointGeometry(feature)) {
             return false;
@@ -382,18 +555,22 @@ export async function GET(request: NextRequest) {
         {
           type: "FeatureCollection",
           metadata: {
-            source: "OpenStreetMap snapshot generated via OSMnx/Overpass",
+            source:
+              "OpenStreetMap snapshot generated via OSMnx/Overpass + GTK registry",
             sourceStatus:
-              sourceFilter === "gtk" ? "gtk_osm_snapshot" : "osm_snapshot",
+              sourceFilter === "gtk"
+                ? "gtk_osm_snapshot_and_registry"
+                : "osm_snapshot_and_gtk_registry",
             mode:
               sourceFilter === "gtk"
-                ? "country_gtk_snapshot"
-                : "country_snapshot",
+                ? "country_gtk_snapshot_and_registry"
+                : "country_snapshot_and_registry",
             generatedAt: snapshotMetadata.generatedAt || null,
             country: snapshotMetadata.country || "Poland",
             strategy: snapshotMetadata.strategy || "voivodeship-snapshot",
             count: countryFeatures.length,
             snapshotCount: snapshotMetadata.count ?? snapshot.features.length,
+            gtkRegistryCount: gtkRegistryFeatures.length,
             exactDisabledParkingSpaces:
               typeCounts.exactDisabledParkingSpaces,
             parkingsWithDisabledCapacity:
@@ -409,7 +586,7 @@ export async function GET(request: NextRequest) {
         },
         {
           headers: {
-            "Cache-Control": "s-maxage=3600, stale-while-revalidate=86400"
+            "Cache-Control": "no-store"
           }
         }
       );
@@ -423,7 +600,7 @@ export async function GET(request: NextRequest) {
       return jsonError("Invalid latitude or longitude range", 400);
     }
 
-    const features = displayableSnapshotFeatures
+    const features = displayableFeatures
       .map((feature) => withDistance(feature, lat, lng))
       .filter((feature): feature is SnapshotFeature => {
         return Boolean(
@@ -445,9 +622,10 @@ export async function GET(request: NextRequest) {
       {
         type: "FeatureCollection",
         metadata: {
-          source: "OpenStreetMap snapshot generated via OSMnx/Overpass",
-          sourceStatus: "osm_snapshot",
-          mode: "static_snapshot_filter",
+          source:
+            "OpenStreetMap snapshot generated via OSMnx/Overpass + GTK registry",
+          sourceStatus: "osm_snapshot_and_gtk_registry",
+          mode: "static_snapshot_filter_with_gtk_registry",
           generatedAt: snapshotMetadata.generatedAt || null,
           country: snapshotMetadata.country || "Poland",
           strategy: snapshotMetadata.strategy || "voivodeship-snapshot",
@@ -458,6 +636,7 @@ export async function GET(request: NextRequest) {
           radiusMeters: radius,
           count: features.length,
           snapshotCount: snapshotMetadata.count ?? snapshot.features.length,
+          gtkRegistryCount: gtkRegistryFeatures.length,
           exactDisabledParkingSpaces:
             typeCounts.exactDisabledParkingSpaces,
           parkingsWithDisabledCapacity:
@@ -473,7 +652,7 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          "Cache-Control": "s-maxage=3600, stale-while-revalidate=86400"
+          "Cache-Control": "no-store"
         }
       }
     );
