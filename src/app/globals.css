@@ -4039,3 +4039,21 @@ textarea {
   line-height: 1.1 !important;
   font-weight: 1000 !important;
 }
+/* --- GTK: navigation link inside map toolbar --- */
+
+.map-btn-navigation-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  background: linear-gradient(135deg, #1477d4, #26b7ff);
+  text-decoration: none;
+  box-shadow: 0 12px 26px rgba(20, 119, 212, 0.22);
+}
+
+.map-btn-navigation-link:hover {
+  color: #ffffff;
+  text-decoration: none;
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(20, 119, 212, 0.28);
+}

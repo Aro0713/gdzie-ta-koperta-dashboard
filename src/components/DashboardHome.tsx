@@ -1,7 +1,6 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { DashboardSpotList } from "@/components/DashboardSpotList";
 import { KopertyMap, type UserAddedSpot } from "@/components/KopertyMap";
 import { StatsCards, type StatsCardItem } from "@/components/StatsCards";
@@ -328,14 +327,11 @@ export function DashboardHome() {
                 lokalizacji koperty. Punkty GTK są szkicami dodanymi z mapy.
               </p>
             </div>
-
-            <Link href="/mapa" className="text-link">
-              Nawigacja
-            </Link>
           </div>
 
           <KopertyMap
             full
+            showNavigationLink
             onOsmData={setOsmData}
             onUserSpotsChange={setUserSpots}
           />

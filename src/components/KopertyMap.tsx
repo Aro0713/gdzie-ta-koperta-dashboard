@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { appConfig } from "@/lib/appConfig";
 import {
@@ -164,6 +165,7 @@ type KopertyMapProps = {
   showRadiusControl?: boolean;
   useViewportRadius?: boolean;
   refreshOsmOnRouteOverlay?: boolean;
+  showNavigationLink?: boolean;
   externalUserSpotRequest?: ExternalUserSpotRequest | null;
   onExternalUserSpotRequestHandled?: (id: string) => void;
   onOsmData?: (data: OsmParkingResponse) => void;
@@ -651,6 +653,7 @@ export function KopertyMap({
   showRadiusControl = true,
   useViewportRadius = false,
   refreshOsmOnRouteOverlay = false,
+  showNavigationLink = false,
   externalUserSpotRequest = null,
   onExternalUserSpotRequestHandled,
   onOsmData,
@@ -2310,6 +2313,15 @@ export function KopertyMap({
                 {showRemoveChooser ? "Anuluj" : "Usuń"}
               </button>
             ) : null}
+                {showNavigationLink ? (
+                <Link
+                  href="/mapa"
+                  className="map-btn map-btn-navigation-link"
+                  title="Przejdź do pełnej nawigacji"
+                >
+                  Nawigacja
+                </Link>
+              ) : null}
                 {navigationControl?.active ? (
               <>
                 <button
