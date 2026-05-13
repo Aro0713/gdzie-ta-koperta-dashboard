@@ -176,6 +176,11 @@ const MIN_SEARCH_RADIUS_METERS = 100;
 const MAX_SEARCH_RADIUS_METERS = 5000;
 const DEFAULT_SEARCH_RADIUS_METERS = 5000;
 const NAVIGATION_VIEWPORT_ZOOM = 16;
+const NAVIGATION_FOLLOW_ZOOM = 17;
+const NAVIGATION_TURN_ZOOM = 18;
+const NAVIGATION_TURN_DISTANCE_METERS = 120;
+const NAVIGATION_TURN_MIN_ANGLE_DEGREES = 32;
+const NAVIGATION_CURSOR_SCREEN_Y_RATIO = 0.68;
 const LOCAL_USER_SPOTS_KEY = "gdzietakoperta.localUserSpots.v1";
 
 const POLAND_BOUNDS: [[number, number], [number, number]] = [
@@ -356,6 +361,50 @@ function getRouteOverlayRefreshCenter(overlay: RouteMapOverlay | null) {
   return null;
 }
 
+function getRouteLatLngsFromOverlay(overlay?: RouteMapOverlay | null) {
+  if (!overlay) {
+    return [];
+  }
+
+  const routeLatLngsFromNormalized = Array.isArray(overlay.routeCoordinates)
+    ? overlay.routeCoordinates
+        .map((coordinate) => {
+          const lat = Number(coordinate.lat);
+          const lng = Number(coordinate.lng);
+
+          if (!hasValidCoordinates(lat, lng)) {
+            return null;
+          }
+
+          return [lat, lng] as [number, number];
+        })
+        .filter((point): point is [number, number] => Boolean(point))
+    : [];
+
+  const rawRouteCoordinates =
+    overlay.route?.features?.[0]?.geometry?.type === "LineString" &&
+    Array.isArray(overlay.route.features[0].geometry.coordinates)
+      ? overlay.route.features[0].geometry.coordinates
+      : [];
+
+  const routeLatLngsFromRaw = rawRouteCoordinates
+    .map((coordinate) => {
+      const lng = Number(coordinate[0]);
+      const lat = Number(coordinate[1]);
+
+      if (!hasValidCoordinates(lat, lng)) {
+        return null;
+      }
+
+      return [lat, lng] as [number, number];
+    })
+    .filter((point): point is [number, number] => Boolean(point));
+
+  return routeLatLngsFromNormalized.length > 1
+    ? routeLatLngsFromNormalized
+    : routeLatLngsFromRaw;
+}
+
 function distanceBetweenLatLngMeters(
   first: { lat: number; lng: number },
   second: { lat: number; lng: number }
@@ -376,6 +425,167 @@ function distanceBetweenLatLngMeters(
       Math.sin(dLng / 2);
 
   return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function bearingDegrees(
+  first: { lat: number; lng: number },
+  second: { lat: number; lng: number }
+) {
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const lat1 = toRadians(first.lat);
+  const lat2 = toRadians(second.lat);
+  const dLng = toRadians(second.lng - first.lng);
+
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+
+  return (((Math.atan2(y, x) * 180) / Math.PI) + 360) % 360;
+}
+
+function angleDifferenceDegrees(first: number, second: number) {
+  const diff = Math.abs(first - second) % 360;
+
+  return diff > 180 ? 360 - diff : diff;
+}
+
+function getTurnLabel(angleDifference: number) {
+  if (angleDifference >= 110) {
+    return "mocny skręt";
+  }
+
+  if (angleDifference >= 60) {
+    return "skręt";
+  }
+
+  return "lekki skręt";
+}
+
+function findNearestRoutePointIndex(
+  routeLatLngs: Array<[number, number]>,
+  currentPosition: { lat: number; lng: number }
+) {
+  if (routeLatLngs.length === 0) {
+    return -1;
+  }
+
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  routeLatLngs.forEach(([lat, lng], index) => {
+    const distance = distanceBetweenLatLngMeters(currentPosition, {
+      lat,
+      lng
+    });
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+
+  return bestIndex;
+}
+
+function getUpcomingRouteBend(
+  routeLatLngs: Array<[number, number]>,
+  currentPosition: { lat: number; lng: number }
+) {
+  if (routeLatLngs.length < 5) {
+    return null;
+  }
+
+  const nearestIndex = findNearestRoutePointIndex(routeLatLngs, currentPosition);
+
+  if (nearestIndex < 0) {
+    return null;
+  }
+
+  let travelledDistance = 0;
+
+  for (
+    let index = Math.max(1, nearestIndex);
+    index < routeLatLngs.length - 2;
+    index += 1
+  ) {
+    const [previousLat, previousLng] = routeLatLngs[index - 1];
+    const [currentLat, currentLng] = routeLatLngs[index];
+    const [nextLat, nextLng] = routeLatLngs[index + 1];
+
+    const previousPoint = {
+      lat: previousLat,
+      lng: previousLng
+    };
+    const bendPoint = {
+      lat: currentLat,
+      lng: currentLng
+    };
+    const nextPoint = {
+      lat: nextLat,
+      lng: nextLng
+    };
+
+    if (index > nearestIndex) {
+      const [segmentStartLat, segmentStartLng] = routeLatLngs[index - 1];
+      travelledDistance += distanceBetweenLatLngMeters(
+        {
+          lat: segmentStartLat,
+          lng: segmentStartLng
+        },
+        bendPoint
+      );
+    }
+
+    if (travelledDistance > NAVIGATION_TURN_DISTANCE_METERS) {
+      return null;
+    }
+
+    const beforeBearing = bearingDegrees(previousPoint, bendPoint);
+    const afterBearing = bearingDegrees(bendPoint, nextPoint);
+    const angleDifference = angleDifferenceDegrees(beforeBearing, afterBearing);
+
+    if (angleDifference >= NAVIGATION_TURN_MIN_ANGLE_DEGREES) {
+      return {
+        lat: bendPoint.lat,
+        lng: bendPoint.lng,
+        distanceMeters: Math.round(
+          distanceBetweenLatLngMeters(currentPosition, bendPoint)
+        ),
+        angleDifference,
+        label: getTurnLabel(angleDifference)
+      };
+    }
+  }
+
+  return null;
+}
+
+function getFollowCenterLatLng(
+  map: import("leaflet").Map,
+  currentPosition: { lat: number; lng: number },
+  routeBend: { lat: number; lng: number } | null,
+  zoom: number
+) {
+  const size = map.getSize();
+  const currentPoint = map.project(
+    [currentPosition.lat, currentPosition.lng],
+    zoom
+  );
+
+  if (routeBend) {
+    const bendPoint = map.project([routeBend.lat, routeBend.lng], zoom);
+
+    const centerPoint = currentPoint.multiplyBy(0.42).add(
+      bendPoint.multiplyBy(0.58)
+    );
+
+    return map.unproject(centerPoint, zoom);
+  }
+
+  const yOffset = size.y * (NAVIGATION_CURSOR_SCREEN_Y_RATIO - 0.5);
+  const centerPoint = currentPoint.subtract([0, yOffset]);
+
+  return map.unproject(centerPoint, zoom);
 }
 
 function getViewportRadiusMeters(
@@ -1107,17 +1317,6 @@ export function KopertyMap({
     }
   }
 
-  function hasValidCoordinates(lat: number, lng: number) {
-    return (
-      Number.isFinite(lat) &&
-      Number.isFinite(lng) &&
-      lat >= -90 &&
-      lat <= 90 &&
-      lng >= -180 &&
-      lng <= 180
-    );
-  }
-
   function drawRouteOverlay(
     overlay?: RouteMapOverlay | null,
     forcedL?: LeafletWithCluster,
@@ -1139,44 +1338,7 @@ export function KopertyMap({
     const layer = L.layerGroup();
     const boundsPoints: Array<[number, number]> = [];
 
-    const routeLatLngsFromNormalized = Array.isArray(overlay.routeCoordinates)
-      ? overlay.routeCoordinates
-          .map((coordinate) => {
-            const lat = Number(coordinate.lat);
-            const lng = Number(coordinate.lng);
-
-            if (!hasValidCoordinates(lat, lng)) {
-              return null;
-            }
-
-            return [lat, lng] as [number, number];
-          })
-          .filter((point): point is [number, number] => Boolean(point))
-      : [];
-
-    const rawRouteCoordinates =
-      overlay.route?.features?.[0]?.geometry?.type === "LineString" &&
-      Array.isArray(overlay.route.features[0].geometry.coordinates)
-        ? overlay.route.features[0].geometry.coordinates
-        : [];
-
-    const routeLatLngsFromRaw = rawRouteCoordinates
-      .map((coordinate) => {
-        const lng = Number(coordinate[0]);
-        const lat = Number(coordinate[1]);
-
-        if (!hasValidCoordinates(lat, lng)) {
-          return null;
-        }
-
-        return [lat, lng] as [number, number];
-      })
-      .filter((point): point is [number, number] => Boolean(point));
-
-    const routeLatLngs =
-      routeLatLngsFromNormalized.length > 1
-        ? routeLatLngsFromNormalized
-        : routeLatLngsFromRaw;
+    const routeLatLngs = getRouteLatLngsFromOverlay(overlay);
 
     let routeLine: import("leaflet").Polyline | null = null;
 
@@ -1210,12 +1372,12 @@ export function KopertyMap({
       const navigationUserIcon = L.divIcon({
         className: `route-navigation-user-marker${statusClass}`,
         html: `
-          <span class="route-navigation-user-arrow"${headingStyle}>▲</span>
+          <span class="route-navigation-user-car"${headingStyle}>🚗</span>
           <small>TY</small>
         `,
-        iconSize: [46, 46],
-        iconAnchor: [23, 23],
-        popupAnchor: [0, -16]
+        iconSize: [52, 52],
+        iconAnchor: [26, 26],
+        popupAnchor: [0, -18]
       });
 
       const navigationUserMarker = L.marker(
@@ -1228,7 +1390,7 @@ export function KopertyMap({
         `
           <div class="osm-popup route-popup">
             <strong>Twoja pozycja</strong>
-            <span>Pozycja aktualizowana podczas prowadzenia do koperty.</span>
+            <span>Pozycja aktualizowana podczas nawigacji.</span>
           </div>
         `
       );
@@ -1238,6 +1400,38 @@ export function KopertyMap({
         overlay.currentPosition.lat,
         overlay.currentPosition.lng
       ]);
+      const upcomingBend =
+        routeLatLngs.length > 1 && overlay.currentPosition
+          ? getUpcomingRouteBend(routeLatLngs, overlay.currentPosition)
+          : null;
+
+      if (upcomingBend) {
+        const bendIcon = L.divIcon({
+          className: "route-maneuver-marker",
+          html: `
+            <span>↱</span>
+            <small>${upcomingBend.distanceMeters} m</small>
+          `,
+          iconSize: [48, 48],
+          iconAnchor: [24, 24],
+          popupAnchor: [0, -18]
+        });
+
+        const bendMarker = L.marker([upcomingBend.lat, upcomingBend.lng], {
+          icon: bendIcon,
+          zIndexOffset: 2050
+        }).bindPopup(
+          `
+            <div class="osm-popup route-popup">
+              <strong>Nadchodzący manewr</strong>
+              <span>${upcomingBend.label}, około ${upcomingBend.distanceMeters} m.</span>
+            </div>
+          `
+        );
+
+        layer.addLayer(bendMarker);
+        boundsPoints.push([upcomingBend.lat, upcomingBend.lng]);
+      }
     }
 
     if (
@@ -1331,23 +1525,39 @@ export function KopertyMap({
       routeLine.bringToFront();
     }
 
-    if (
-      overlay.fitMode === "follow" &&
-      overlay.currentPosition &&
-      hasValidCoordinates(overlay.currentPosition.lat, overlay.currentPosition.lng)
-    ) {
-      if (!navigationFollowPaused) {
-        programmaticMapMove.current = true;
+     if (
+        overlay.fitMode === "follow" &&
+        overlay.currentPosition &&
+        hasValidCoordinates(overlay.currentPosition.lat, overlay.currentPosition.lng)
+      ) {
+        if (!navigationFollowPaused) {
+          const upcomingBend =
+            routeLatLngs.length > 1
+              ? getUpcomingRouteBend(routeLatLngs, overlay.currentPosition)
+              : null;
 
-        map.panTo([overlay.currentPosition.lat, overlay.currentPosition.lng], {
-          animate: true
-        });
+          const targetZoom = upcomingBend
+            ? NAVIGATION_TURN_ZOOM
+            : NAVIGATION_FOLLOW_ZOOM;
 
-        window.setTimeout(() => {
-          programmaticMapMove.current = false;
-        }, 450);
-      }
-    } else if (overlay.fitMode !== "none") {
+          const centerLatLng = getFollowCenterLatLng(
+            map,
+            overlay.currentPosition,
+            upcomingBend,
+            targetZoom
+          );
+
+          programmaticMapMove.current = true;
+
+          map.setView(centerLatLng, targetZoom, {
+            animate: true
+          });
+
+          window.setTimeout(() => {
+            programmaticMapMove.current = false;
+          }, 650);
+        }
+      } else if (overlay.fitMode !== "none") {
       if (boundsPoints.length > 1) {
         map.fitBounds(L.latLngBounds(boundsPoints), {
           padding: [42, 42],
@@ -2220,28 +2430,43 @@ export function KopertyMap({
   }
 
   function recenterNavigation() {
-  const map = leafletMap.current;
-  const currentPosition = routeOverlay?.currentPosition;
+    const map = leafletMap.current;
+    const currentPosition = routeOverlay?.currentPosition;
 
-  if (
-    !map ||
-    !currentPosition ||
-    !hasValidCoordinates(currentPosition.lat, currentPosition.lng)
-  ) {
-    return;
+    if (
+      !map ||
+      !currentPosition ||
+      !hasValidCoordinates(currentPosition.lat, currentPosition.lng)
+    ) {
+      return;
+    }
+
+    const routeLatLngs = getRouteLatLngsFromOverlay(routeOverlay);
+    const upcomingBend =
+      routeLatLngs.length > 1
+        ? getUpcomingRouteBend(routeLatLngs, currentPosition)
+        : null;
+
+    const targetZoom = upcomingBend ? NAVIGATION_TURN_ZOOM : NAVIGATION_FOLLOW_ZOOM;
+
+    const centerLatLng = getFollowCenterLatLng(
+      map,
+      currentPosition,
+      upcomingBend,
+      targetZoom
+    );
+
+    setNavigationFollowPaused(false);
+    programmaticMapMove.current = true;
+
+    map.setView(centerLatLng, targetZoom, {
+      animate: true
+    });
+
+    window.setTimeout(() => {
+      programmaticMapMove.current = false;
+    }, 650);
   }
-
-  setNavigationFollowPaused(false);
-  programmaticMapMove.current = true;
-
-  map.panTo([currentPosition.lat, currentPosition.lng], {
-    animate: true
-  });
-
-  window.setTimeout(() => {
-    programmaticMapMove.current = false;
-  }, 450);
-}
 
   return (
     <div className={`map-shell ${full ? "map-shell-full" : ""}`}>

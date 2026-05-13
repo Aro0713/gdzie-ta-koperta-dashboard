@@ -3843,31 +3843,29 @@ textarea {
     box-shadow: 0 0 0 8px rgba(220, 38, 38, 0);
   }
 }
-/* --- GTK: live navigation user marker --- */
+/* --- GTK: live navigation car marker and maneuver marker --- */
 
 .route-navigation-user-marker {
   display: grid !important;
   place-items: center !important;
-  width: 46px !important;
-  height: 46px !important;
+  width: 52px !important;
+  height: 52px !important;
   border: 4px solid white !important;
   border-radius: 999px !important;
   color: white !important;
   background: linear-gradient(135deg, #0f172a, #1477d4) !important;
   box-shadow:
     0 16px 38px rgba(15, 23, 42, 0.34),
-    0 0 0 7px rgba(20, 119, 212, 0.16) !important;
+    0 0 0 8px rgba(20, 119, 212, 0.16) !important;
 }
 
-.route-navigation-user-marker .route-navigation-user-arrow {
+.route-navigation-user-marker .route-navigation-user-car {
   display: grid !important;
-  width: 22px !important;
-  height: 22px !important;
+  width: 28px !important;
+  height: 28px !important;
   place-items: center !important;
-  color: white !important;
-  font-size: 1rem !important;
+  font-size: 1.18rem !important;
   line-height: 1 !important;
-  font-weight: 1000 !important;
   transform-origin: 50% 58% !important;
 }
 
@@ -3891,14 +3889,50 @@ textarea {
   background: linear-gradient(135deg, #7f1d1d, #dc2626) !important;
   box-shadow:
     0 16px 38px rgba(127, 29, 29, 0.34),
-    0 0 0 7px rgba(220, 38, 38, 0.16) !important;
+    0 0 0 8px rgba(220, 38, 38, 0.16) !important;
 }
 
 .route-navigation-user-marker-arrived {
   background: linear-gradient(135deg, #14532d, #16a34a) !important;
   box-shadow:
     0 16px 38px rgba(20, 83, 45, 0.34),
-    0 0 0 7px rgba(22, 163, 74, 0.18) !important;
+    0 0 0 8px rgba(22, 163, 74, 0.18) !important;
+}
+
+.route-maneuver-marker {
+  display: grid !important;
+  width: 48px !important;
+  height: 48px !important;
+  place-items: center !important;
+  border: 3px solid #ffffff !important;
+  border-radius: 999px !important;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #7c3aed, #1477d4) !important;
+  box-shadow:
+    0 16px 34px rgba(124, 58, 237, 0.32),
+    0 0 0 7px rgba(124, 58, 237, 0.14) !important;
+}
+
+.route-maneuver-marker span {
+  display: grid !important;
+  width: 24px !important;
+  height: 24px !important;
+  place-items: center !important;
+  font-size: 1.4rem !important;
+  line-height: 1 !important;
+  font-weight: 1000 !important;
+}
+
+.route-maneuver-marker small {
+  display: block !important;
+  margin-top: -9px !important;
+  padding: 1px 6px !important;
+  border-radius: 999px !important;
+  color: #4c1d95 !important;
+  background: #ffffff !important;
+  font-size: 0.5rem !important;
+  line-height: 1.1 !important;
+  font-weight: 1000 !important;
 }
 /* --- GTK: route target choice --- */
 
@@ -4057,3 +4091,4 @@ textarea {
   transform: translateY(-1px);
   box-shadow: 0 14px 30px rgba(20, 119, 212, 0.28);
 }
+
