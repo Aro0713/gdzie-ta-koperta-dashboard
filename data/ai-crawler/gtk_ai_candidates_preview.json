@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "count": 0,
+  "image": "data\\ai-crawler\\ortho_test.png",
+  "debugImage": "data\\ai-crawler\\ortho_debug_candidates.png",
+  "rejectedFile": "data\\ai-crawler\\gtk_ai_candidates_rejected.json",
+  "rejectSummary": {
+    "below_min_confidence": 803
+  },
+  "requirements": {
+    "blueField": true,
+    "whiteRectangleOutline": true,
+    "crossedWhiteLines": true,
+    "pavedContext": true,
+    "rejectVehiclesRoofsVegetation": true,
+    "minimumRuleMatchPercent": 95,
+    "minimumDetectorScore": 0.7
+  },
+  "candidates": []
+}
