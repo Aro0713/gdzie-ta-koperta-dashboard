@@ -1,11 +1,12 @@
-﻿import { cookies } from "next/headers";
+import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import {
   OSM_SESSION_COOKIE,
   decryptSession,
   getOsmConfig,
-  isSessionValid
+  isSessionValid,
+  getBearerSessionFromAuthorization
 } from "@/lib/osmOAuth";
 
 export const runtime = "nodejs";
@@ -15,6 +16,7 @@ type CreateDisabledParkingBody = {
   lat?: number;
   lng?: number;
   localSpotId?: string;
+  source?: string;
 };
 
 function jsonError(message: string, status = 400, details?: unknown) {
@@ -106,6 +108,8 @@ function buildNodeXml(changesetId: string, lat: number, lng: number) {
   )}" lon="${xmlEscape(formatCoordinate(lng))}">
     <tag k="amenity" v="parking_space"/>
     <tag k="parking_space" v="disabled"/>
+    <tag k="survey:tool" v="GdzieTaKoperta"/>
+    <tag k="source:application" v="GdzieTaKoperta"/>
     <tag k="check_date" v="${xmlEscape(formatOsmDate())}"/>
   </node>
 </osm>`;
@@ -120,6 +124,7 @@ async function registerManualSubmissionInGtk(params: {
   osmUrl: string;
   lat: number;
   lng: number;
+  source?: string;
 }) {
   await sql`
     INSERT INTO gtk_osm_submissions (
@@ -149,7 +154,7 @@ async function registerManualSubmissionInGtk(params: {
       ${params.lng},
       'submitted_to_osm',
       ${JSON.stringify({
-        source: "manual_map_add",
+        source: params.source || "manual_map_add",
         app: "GdzieTaKoperta"
       })}::jsonb
     )
@@ -171,7 +176,11 @@ async function registerManualSubmissionInGtk(params: {
 
 export async function POST(request: NextRequest) {
   const cookieStore = await cookies();
-  const rawSession = cookieStore.get(OSM_SESSION_COOKIE)?.value;
+  const rawCookieSession = cookieStore.get(OSM_SESSION_COOKIE)?.value;
+  const rawBearerSession = getBearerSessionFromAuthorization(
+    request.headers.get("Authorization")
+  );
+  const rawSession = rawBearerSession || rawCookieSession;
   const session = rawSession ? decryptSession(rawSession) : null;
 
   if (!isSessionValid(session)) {
@@ -248,7 +257,8 @@ export async function POST(request: NextRequest) {
         changesetId,
         osmUrl,
         lat,
-        lng
+        lng,
+        source: body.source
       });
     } catch (error) {
       registrySaved = false;
