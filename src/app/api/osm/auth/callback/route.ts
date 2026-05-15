@@ -1,4 +1,4 @@
-﻿import { cookies } from "next/headers";
+import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import {
   OSM_SESSION_COOKIE,
@@ -6,6 +6,7 @@ import {
   encryptSession,
   getCookieOptions,
   getOsmConfig,
+  parseMobileOauthState,
   type OsmSession
 } from "@/lib/osmOAuth";
 
@@ -31,6 +32,14 @@ function redirectTo(request: NextRequest, path: string) {
   return NextResponse.redirect(new URL(path, request.url));
 }
 
+function redirectMobileAuthError(returnTo: string, error: string) {
+  const url = new URL(returnTo);
+  url.searchParams.set("osm", "error");
+  url.searchParams.set("reason", error);
+
+  return NextResponse.redirect(url);
+}
+
 export async function GET(request: NextRequest) {
   const config = getOsmConfig();
   const { searchParams } = new URL(request.url);
@@ -38,8 +47,13 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get("code");
   const state = searchParams.get("state");
   const error = searchParams.get("error");
+  const mobileState = state ? parseMobileOauthState(state) : null;
 
   if (error) {
+    if (mobileState) {
+      return redirectMobileAuthError(mobileState.returnTo, error);
+    }
+
     return redirectTo(request, `/mapa?osm=error&reason=${encodeURIComponent(error)}`);
   }
 
@@ -51,6 +65,10 @@ export async function GET(request: NextRequest) {
   const expectedState = cookieStore.get(OSM_STATE_COOKIE)?.value;
 
   if (!expectedState || expectedState !== state) {
+    if (mobileState) {
+      return redirectMobileAuthError(mobileState.returnTo, "invalid_state");
+    }
+
     return redirectTo(request, "/mapa?osm=invalid_state");
   }
 
@@ -77,6 +95,10 @@ export async function GET(request: NextRequest) {
       tokenData.error ||
       "token_exchange_failed";
 
+    if (mobileState) {
+      return redirectMobileAuthError(mobileState.returnTo, reason);
+    }
+
     return redirectTo(
       request,
       `/mapa?osm=token_error&reason=${encodeURIComponent(reason)}`
@@ -91,6 +113,10 @@ export async function GET(request: NextRequest) {
   });
 
   if (!userResponse.ok) {
+    if (mobileState) {
+      return redirectMobileAuthError(mobileState.returnTo, "user_details_error");
+    }
+
     return redirectTo(request, "/mapa?osm=user_details_error");
   }
 
@@ -109,11 +135,34 @@ export async function GET(request: NextRequest) {
     }
   };
 
+  const encryptedSession = encryptSession(session);
+
+  if (mobileState) {
+    const responseUrl = new URL(mobileState.returnTo);
+
+    responseUrl.searchParams.set("osm", "connected");
+    responseUrl.searchParams.set("session", encryptedSession);
+    responseUrl.searchParams.set("scope", session.scope || "");
+
+    if (session.user.id) {
+      responseUrl.searchParams.set("osmUserId", String(session.user.id));
+    }
+
+    if (session.user.displayName) {
+      responseUrl.searchParams.set("displayName", session.user.displayName);
+    }
+
+    const response = NextResponse.redirect(responseUrl);
+    response.cookies.delete(OSM_STATE_COOKIE);
+
+    return response;
+  }
+
   const response = redirectTo(request, "/mapa?osm=connected");
 
   response.cookies.set(
     OSM_SESSION_COOKIE,
-    encryptSession(session),
+    encryptedSession,
     getCookieOptions(Math.min(expiresIn, 60 * 60 * 24 * 30))
   );
 

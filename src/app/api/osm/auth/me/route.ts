@@ -1,14 +1,19 @@
-﻿import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { NextRequest, NextResponse } from "next/server";
 import {
   OSM_SESSION_COOKIE,
   decryptSession,
+  getBearerSessionFromAuthorization,
   isSessionValid
 } from "@/lib/osmOAuth";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const cookieStore = await cookies();
-  const rawSession = cookieStore.get(OSM_SESSION_COOKIE)?.value;
+  const rawCookieSession = cookieStore.get(OSM_SESSION_COOKIE)?.value;
+  const rawBearerSession = getBearerSessionFromAuthorization(
+    request.headers.get("Authorization")
+  );
+  const rawSession = rawBearerSession || rawCookieSession;
 
   if (!rawSession) {
     return NextResponse.json({

@@ -1,4 +1,4 @@
-﻿import {
+import {
   createCipheriv,
   createDecipheriv,
   createHash,
@@ -7,6 +7,13 @@
 
 export const OSM_SESSION_COOKIE = "gtk_osm_session";
 export const OSM_STATE_COOKIE = "gtk_osm_oauth_state";
+
+const MOBILE_OAUTH_STATE_PREFIX = "mobile";
+const ALLOWED_MOBILE_RETURN_PROTOCOLS = new Set([
+  "gdzietakoperta:",
+  "exp:",
+  "exps:"
+]);
 
 export type OsmSession = {
   accessToken: string;
@@ -27,6 +34,11 @@ export type OsmConfig = {
   baseUrl: string;
   apiBaseUrl: string;
   sessionSecret: string;
+};
+
+export type MobileOauthState = {
+  nonce: string;
+  returnTo: string;
 };
 
 function requiredEnv(name: string) {
@@ -132,4 +144,61 @@ export function getCookieOptions(maxAge: number) {
 
 export function isSessionValid(session: OsmSession | null) {
   return Boolean(session && session.expiresAt > Date.now());
+}
+
+export function getBearerSessionFromAuthorization(authorization: string | null) {
+  const match = authorization?.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
+export function isAllowedMobileReturnTo(value: string) {
+  try {
+    const url = new URL(value);
+    return ALLOWED_MOBILE_RETURN_PROTOCOLS.has(url.protocol);
+  } catch {
+    return false;
+  }
+}
+
+export function makeMobileOauthState(returnTo: string) {
+  if (!isAllowedMobileReturnTo(returnTo)) {
+    throw new Error("Invalid mobile return URL.");
+  }
+
+  const nonce = makeOauthState();
+  const payload = Buffer.from(JSON.stringify({ returnTo }), "utf8").toString(
+    "base64url"
+  );
+
+  return `${MOBILE_OAUTH_STATE_PREFIX}.${nonce}.${payload}`;
+}
+
+export function parseMobileOauthState(state: string): MobileOauthState | null {
+  try {
+    const [prefix, nonce, payload] = state.split(".");
+
+    if (prefix !== MOBILE_OAUTH_STATE_PREFIX || !nonce || !payload) {
+      return null;
+    }
+
+    const parsed = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8")
+    ) as {
+      returnTo?: unknown;
+    };
+
+    if (
+      typeof parsed.returnTo !== "string" ||
+      !isAllowedMobileReturnTo(parsed.returnTo)
+    ) {
+      return null;
+    }
+
+    return {
+      nonce,
+      returnTo: parsed.returnTo
+    };
+  } catch {
+    return null;
+  }
 }
