@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-05-24T06:21:25.140521+00:00",
+  "generatedAt": "2026-05-25T06:58:41.020620+00:00",
   "country": "Poland",
   "strategy": "voivodeship-snapshot-public-access-deduped",
-  "count": 25755,
+  "count": 25753,
   "exactDisabledParkingSpaces": 17020,
-  "parkingsWithDisabledCapacity": 8735,
+  "parkingsWithDisabledCapacity": 8733,
   "files": {
     "geojson": "public/data/disabled-parking.geojson",
     "geopackage": "data/osm-disabled-parking.gpkg",
