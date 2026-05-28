@@ -1,4 +1,4 @@
-﻿const appName = "Gdzie ta koperta?";
+const appName = "Gdzie ta koperta?";
 const appSlug = "gdzie-ta-koperta-mobile";
 const appScheme = "gdzietakoperta";
 const appId = "pl.gdzietakoperta.app";
@@ -48,7 +48,7 @@ module.exports = ({ config }) => {
       }
     },
 
-    plugins: config.plugins || [],
+    plugins: Array.from(new Set([...(config.plugins || []), "expo-audio"])),
 
     extra: {
       ...(config.extra || {}),
