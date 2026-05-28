@@ -14,6 +14,11 @@ import {
   getOsmTitle,
   type OsmParkingFeature
 } from "@/lib/osmParking";
+import {
+  playWebNavigationVoiceCommand,
+  stopWebNavigationVoice,
+  type WebNavigationVoiceCommandId
+} from "@/lib/webNavigationVoice";
 
 type RouteAssistantResponse = {
   ok?: boolean;
@@ -428,6 +433,7 @@ export default function MapaPage() {
   const [speechSupported, setSpeechSupported] = useState(false);
   const [speechListening, setSpeechListening] = useState(false);
   const [speechMessage, setSpeechMessage] = useState<string | null>(null);
+  const [webVoiceMessage, setWebVoiceMessage] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -460,6 +466,18 @@ export default function MapaPage() {
     }
 
     setSpeechListening(false);
+  }
+
+  async function playWebVoice(commandId: WebNavigationVoiceCommandId) {
+    const result = await playWebNavigationVoiceCommand(commandId);
+
+    if (result.ok) {
+      setWebVoiceMessage(`Odtworzono: ${commandId}`);
+      return;
+    }
+
+    setWebVoiceMessage(result.error);
+    console.warn("[web-navigation-voice]", result.error);
   }
 
   function startVoiceInput() {
@@ -740,7 +758,7 @@ export default function MapaPage() {
     });
   }
 
-  function stopNavigation() {
+  function stopNavigation(options: { silent?: boolean } = {}) {
     if (navigator.geolocation && navigationWatchId.current !== null) {
       navigator.geolocation.clearWatch(navigationWatchId.current);
       navigationWatchId.current = null;
@@ -757,6 +775,11 @@ export default function MapaPage() {
 
     setArrivalSpotPromptVisible(false);
     setAssistantPanelCollapsed(false);
+
+    if (!options.silent) {
+      stopWebNavigationVoice();
+      void playWebVoice("nav_navigation_stop");
+    }
 
     if (assistantResult) {
       setRouteOverlay({
@@ -806,6 +829,7 @@ export default function MapaPage() {
 
       updateNavigationFromPosition(firstPosition);
       setAssistantPanelCollapsed(true);
+      void playWebVoice("nav_navigation_start");
 
       navigationWatchId.current = navigator.geolocation.watchPosition(
         updateNavigationFromPosition,
@@ -826,6 +850,7 @@ export default function MapaPage() {
           ? error.message
           : "Nie udało się uruchomić nawigacji.";
 
+      void playWebVoice("route_network_error");
       setAssistantError(message);
     }
   }
@@ -908,10 +933,12 @@ export default function MapaPage() {
       const data = (await response.json()) as RouteAssistantResponse;
 
       if (!response.ok || !data.ok) {
+        void playWebVoice("route_no_route_found");
         throw new Error(data.error || "Nie udało się wyznaczyć trasy.");
       }
 
       setAssistantResult(data);
+      void playWebVoice(data.recommendedSpot ? "gtk_found_parking" : "nav_route_ready");
 
       if (data.recommendedSpot) {
         setRouteOverlay({
@@ -1018,7 +1045,7 @@ export default function MapaPage() {
                       : "Pokaż panel asystenta dojazdu",
                     showStop: navigationState.active,
                     onOpen: () => setAssistantPanelCollapsed(false),
-                    onStop: stopNavigation
+                    onStop: () => stopNavigation()
                   }
                 : null
             }
@@ -1082,6 +1109,12 @@ export default function MapaPage() {
                 </button>
               </div>
             </form>
+
+            {webVoiceMessage ? (
+              <p className="route-assistant-voice-hint route-assistant-web-voice-hint">
+                {webVoiceMessage}
+              </p>
+            ) : null}
 
             {speechMessage ? (
               <div
@@ -1195,6 +1228,22 @@ export default function MapaPage() {
                   </div>
 
                   <div className="route-navigation-actions">
+                    <button
+                      type="button"
+                      className="route-navigation-secondary web-navigation-voice-test"
+                      onClick={() => void playWebVoice("nav_route_ready")}
+                    >
+                      Test głosu
+                    </button>
+
+                    <button
+                      type="button"
+                      className="route-navigation-secondary"
+                      onClick={() => void playWebVoice("nav_turn_right")}
+                    >
+                      Test manewru
+                    </button>
+
                     {!navigationState.active ? (
                       <button
                         type="button"
@@ -1208,7 +1257,7 @@ export default function MapaPage() {
                       <button
                         type="button"
                         className="route-navigation-secondary"
-                        onClick={stopNavigation}
+                        onClick={() => stopNavigation()}
                       >
                         Stop
                       </button>
