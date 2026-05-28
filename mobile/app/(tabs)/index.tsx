@@ -30,6 +30,7 @@ import {
   submitDisabledParkingSpace,
   type OsmMobileUser
 } from "@/lib/osmMobileAuth";
+import { useNavigationVoice } from "@/lib/useNavigationVoice";
 
 type LocationState =
   | {
@@ -213,6 +214,7 @@ export default function HomeScreen() {
   const [osmMessage, setOsmMessage] = useState("Nie połączono z OpenStreetMap.");
   const [osmLoading, setOsmLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
+  const { playVoiceCommand, lastCommandId, voiceError } = useNavigationVoice();
 
   useEffect(() => {
     let mounted = true;
@@ -624,6 +626,38 @@ export default function HomeScreen() {
           <Text style={styles.sectionTitle}>Status nawigacji</Text>
           <Text style={styles.statusText}>{routeState.message}</Text>
 
+          <View style={styles.voiceControls}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                styles.flexButton,
+                pressed ? styles.buttonPressed : null
+              ]}
+              onPress={() => playVoiceCommand("nav_route_ready")}
+            >
+              <Text style={styles.secondaryButtonText}>Test głosu</Text>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                styles.flexButton,
+                pressed ? styles.buttonPressed : null
+              ]}
+              onPress={() => playVoiceCommand("nav_turn_right")}
+            >
+              <Text style={styles.secondaryButtonText}>Test manewru</Text>
+            </Pressable>
+          </View>
+
+          {lastCommandId ? (
+            <Text style={styles.metaText}>Ostatni komunikat: {lastCommandId}</Text>
+          ) : null}
+
+          {voiceError ? (
+            <Text style={styles.errorText}>{voiceError}</Text>
+          ) : null}
+
           {routeState.status === "loading" ? (
             <ActivityIndicator style={styles.loader} />
           ) : null}
@@ -947,5 +981,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#111827",
     fontVariant: ["tabular-nums"]
+  },
+  voiceControls: {
+    flexDirection: "row",
+    gap: 10
+  },
+  errorText: {
+    fontSize: 13,
+    color: "#b91c1c",
+    fontWeight: "800"
   }
 });
