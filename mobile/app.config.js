@@ -4,8 +4,6 @@ const appScheme = "gdzietakoperta";
 const appId = "pl.gdzietakoperta.app";
 
 module.exports = ({ config }) => {
-  const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY;
-
   return {
     ...config,
     name: appName,
@@ -24,7 +22,8 @@ module.exports = ({ config }) => {
       infoPlist: {
         ...(config.ios?.infoPlist || {}),
         NSLocationWhenInUseUsageDescription:
-          "Aplikacja używa lokalizacji, aby pokazać Twoją pozycję, znaleźć kopertę przy celu podróży i umożliwić dodanie nowej koperty."
+          "Aplikacja używa lokalizacji, aby pokazać Twoją pozycję, znaleźć kopertę przy celu podróży i umożliwić dodanie nowej koperty.",
+        ITSAppUsesNonExemptEncryption: false
       }
     },
 
@@ -35,24 +34,21 @@ module.exports = ({ config }) => {
       permissions: [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"
-      ],
-      config: {
-        ...(config.android?.config || {}),
-        ...(googleMapsApiKey
-          ? {
-              googleMaps: {
-                apiKey: googleMapsApiKey
-              }
-            }
-          : {})
-      }
+      ]
     },
 
-    plugins: Array.from(new Set([...(config.plugins || []), "expo-audio"])),
+    plugins: Array.from(
+      new Set([
+        ...(config.plugins || []),
+        "@maplibre/maplibre-react-native"
+      ])
+    ),
 
     extra: {
       ...(config.extra || {}),
-      apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL
+      apiBaseUrl:
+        process.env.EXPO_PUBLIC_API_BASE_URL ||
+        "https://www.gdzietakoperta.pl"
     }
   };
 };
