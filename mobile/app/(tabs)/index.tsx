@@ -1,23 +1,29 @@
 import * as Location from "expo-location";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View
 } from "react-native";
-import MapView, { Marker, Polyline, type LatLng } from "react-native-maps";
+import MapView, {
+  Marker,
+  Polyline,
+  type LatLng,
+  type Region
+} from "react-native-maps";
 
 import {
   fetchNearbyParking,
   formatDistanceMeters,
   getParkingFeatureTitle,
-  type ParkingFeature,
-  type ParkingResponse
+  type ParkingFeature
 } from "@/lib/parkingApi";
 import {
   fetchRouteAssistant,
@@ -32,65 +38,11 @@ import {
 } from "@/lib/osmMobileAuth";
 import { useNavigationVoice } from "@/lib/useNavigationVoice";
 
-type LocationState =
-  | {
-      status: "idle";
-      message: string;
-    }
-  | {
-      status: "loading";
-      message: string;
-    }
-  | {
-      status: "ready";
-      latitude: number;
-      longitude: number;
-      accuracy: number | null;
-      message: string;
-    }
-  | {
-      status: "error";
-      message: string;
-    };
-
-type NearbyState =
-  | {
-      status: "idle";
-      message: string;
-    }
-  | {
-      status: "loading";
-      message: string;
-    }
-  | {
-      status: "ready";
-      message: string;
-      response: ParkingResponse;
-      visibleFeatures: ParkingFeature[];
-    }
-  | {
-      status: "error";
-      message: string;
-    };
-
-type RouteState =
-  | {
-      status: "idle";
-      message: string;
-    }
-  | {
-      status: "loading";
-      message: string;
-    }
-  | {
-      status: "ready";
-      message: string;
-      response: RouteAssistantResponse;
-    }
-  | {
-      status: "error";
-      message: string;
-    };
+type Position = {
+  lat: number;
+  lng: number;
+  accuracy: number | null;
+};
 
 type DraftSpot = {
   id: string;
@@ -102,16 +54,18 @@ type DraftSpot = {
   osmChangesetId?: string;
 };
 
-function getFeatureKey(feature: ParkingFeature, index: number) {
-  const properties = feature.properties || {};
-  const osmType = properties.osmType || "node";
-  const osmId = properties.osmId;
+const DEFAULT_REGION: Region = {
+  latitude: 52.237049,
+  longitude: 21.017532,
+  latitudeDelta: 5.8,
+  longitudeDelta: 5.8
+};
 
-  if (osmId !== undefined && osmId !== null) {
-    return `${osmType}:${osmId}`;
-  }
-
-  return `feature:${index}`;
+function toLatLng(position: Position): LatLng {
+  return {
+    latitude: position.lat,
+    longitude: position.lng
+  };
 }
 
 function featureToLatLng(feature?: ParkingFeature | null): LatLng | null {
@@ -175,46 +129,47 @@ function routeCoordinatesToLatLng(values?: unknown[]) {
     .filter((coordinate): coordinate is LatLng => Boolean(coordinate));
 }
 
-function draftToLatLng(draft: DraftSpot | null): LatLng | null {
-  if (!draft) {
-    return null;
+function getFeatureKey(feature: ParkingFeature, index: number) {
+  const properties = feature.properties || {};
+  const osmType = properties.osmType || "node";
+  const osmId = properties.osmId;
+
+  if (osmId !== undefined && osmId !== null) {
+    return `${osmType}:${osmId}`;
   }
 
-  return {
-    latitude: draft.lat,
-    longitude: draft.lng
-  };
+  return `feature:${index}`;
 }
 
-function getInitialRegion(center: LatLng | null) {
+function makeRegion(center: LatLng, zoomed = true): Region {
   return {
-    latitude: center?.latitude ?? 52.237049,
-    longitude: center?.longitude ?? 21.017532,
-    latitudeDelta: center ? 0.035 : 5.8,
-    longitudeDelta: center ? 0.035 : 5.8
+    latitude: center.latitude,
+    longitude: center.longitude,
+    latitudeDelta: zoomed ? 0.035 : 5.8,
+    longitudeDelta: zoomed ? 0.035 : 5.8
   };
 }
 
 export default function HomeScreen() {
+  const mapRef = useRef<MapView | null>(null);
+  const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
+
   const [destinationQuery, setDestinationQuery] = useState("");
-  const [locationState, setLocationState] = useState<LocationState>({
-    status: "idle",
-    message: "Podaj cel podróży albo pobierz lokalizację."
-  });
-  const [nearbyState, setNearbyState] = useState<NearbyState>({
-    status: "idle",
-    message: "Koperty w okolicy pojawią się po pobraniu lokalizacji."
-  });
-  const [routeState, setRouteState] = useState<RouteState>({
-    status: "idle",
-    message: "Wpisz cel, a aplikacja znajdzie kopertę przy celu."
-  });
+  const [currentPosition, setCurrentPosition] = useState<Position | null>(null);
+  const [mapRegion, setMapRegion] = useState<Region>(DEFAULT_REGION);
+
+  const [nearbyParking, setNearbyParking] = useState<ParkingFeature[]>([]);
+  const [routeResult, setRouteResult] = useState<RouteAssistantResponse | null>(null);
   const [draftSpot, setDraftSpot] = useState<DraftSpot | null>(null);
+
   const [osmUser, setOsmUser] = useState<OsmMobileUser | null>(null);
-  const [osmMessage, setOsmMessage] = useState("Nie połączono z OpenStreetMap.");
-  const [osmLoading, setOsmLoading] = useState(false);
+  const [message, setMessage] = useState("Wpisz cel podróży albo użyj lokalizacji.");
+  const [loading, setLoading] = useState(false);
+  const [navigationActive, setNavigationActive] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
-  const { playVoiceCommand, lastCommandId, voiceError } = useNavigationVoice();
+  const [panelExpanded, setPanelExpanded] = useState(true);
+
+  const { playVoiceCommand, voiceError } = useNavigationVoice();
 
   useEffect(() => {
     let mounted = true;
@@ -229,15 +184,12 @@ export default function HomeScreen() {
 
         if (me.authenticated && me.user) {
           setOsmUser(me.user);
-          setOsmMessage(`Zalogowano OSM: ${me.user.displayName || me.user.id}`);
         } else {
           setOsmUser(null);
-          setOsmMessage("Nie połączono z OpenStreetMap.");
         }
       } catch {
         if (mounted) {
           setOsmUser(null);
-          setOsmMessage("Nie połączono z OpenStreetMap.");
         }
       }
     }
@@ -246,86 +198,72 @@ export default function HomeScreen() {
 
     return () => {
       mounted = false;
+
+      if (locationWatchRef.current) {
+        locationWatchRef.current.remove();
+        locationWatchRef.current = null;
+      }
     };
   }, []);
 
-  async function ensureLocation() {
-    setLocationState({
-      status: "loading",
-      message: "Sprawdzam zgodę na lokalizację..."
-    });
-
+  async function requestPosition() {
     const permission = await Location.requestForegroundPermissionsAsync();
 
     if (permission.status !== "granted") {
-      const message =
-        "Brak zgody na lokalizację. Bez niej nie wyznaczymy trasy do koperty.";
-
-      setLocationState({
-        status: "error",
-        message
-      });
-
-      throw new Error(message);
+      throw new Error("Brak zgody na lokalizację.");
     }
-
-    setLocationState({
-      status: "loading",
-      message: "Pobieram aktualną pozycję..."
-    });
 
     const position = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.Balanced
     });
 
-    const location = {
+    const nextPosition: Position = {
       lat: position.coords.latitude,
       lng: position.coords.longitude,
       accuracy: position.coords.accuracy
     };
 
-    setLocationState({
-      status: "ready",
-      latitude: location.lat,
-      longitude: location.lng,
-      accuracy: location.accuracy,
-      message: "Lokalizacja gotowa."
-    });
+    setCurrentPosition(nextPosition);
 
-    return location;
+    const nextRegion = makeRegion(toLatLng(nextPosition));
+    setMapRegion(nextRegion);
+
+    mapRef.current?.animateToRegion(nextRegion, 450);
+
+    return nextPosition;
   }
 
-  async function handleLoadNearbyParking() {
+  async function loadNearbyParking(position: Position) {
+    const response = await fetchNearbyParking({
+      lat: position.lat,
+      lng: position.lng,
+      radius: 5000
+    });
+
+    setNearbyParking(response.features.slice(0, 30));
+
+    return response;
+  }
+
+  async function handleUseLocation() {
     try {
-      const location = await ensureLocation();
+      Keyboard.dismiss();
+      setLoading(true);
+      setMessage("Pobieram lokalizację...");
 
-      setNearbyState({
-        status: "loading",
-        message: "Pobieram koperty w promieniu 5 km..."
-      });
+      const position = await requestPosition();
+      const response = await loadNearbyParking(position);
 
-      const response = await fetchNearbyParking({
-        lat: location.lat,
-        lng: location.lng,
-        radius: 5000
-      });
-
-      setNearbyState({
-        status: "ready",
-        response,
-        visibleFeatures: response.features.slice(0, 5),
-        message: `Znaleziono ${response.features.length} kopert w promieniu ${
-          response.metadata?.radiusMeters ?? 5000
-        } m.`
-      });
+      setMessage(`Znaleziono ${response.features.length} kopert w promieniu 5 km.`);
+      setPanelExpanded(true);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Nie udało się pobrać kopert.";
+      const errorMessage =
+        error instanceof Error ? error.message : "Nie udało się pobrać lokalizacji.";
 
-      setNearbyState({
-        status: "error",
-        message
-      });
+      setMessage(errorMessage);
+      playVoiceCommand("route_network_error");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -333,25 +271,24 @@ export default function HomeScreen() {
     const query = destinationQuery.trim();
 
     if (!query) {
-      setRouteState({
-        status: "error",
-        message: "Wpisz cel podróży, np. „Żeromskiego, Sosnowiec”."
-      });
+      setMessage("Wpisz cel podróży.");
+      playVoiceCommand("nav_destination_needed");
       return;
     }
 
     try {
-      const location = await ensureLocation();
+      Keyboard.dismiss();
+      setLoading(true);
+      setPanelExpanded(true);
+      setMessage("Szukam celu, koperty i trasy...");
+      playVoiceCommand("nav_route_calculating");
 
-      setRouteState({
-        status: "loading",
-        message: "Szukam celu, koperty i trasy..."
-      });
+      const position = currentPosition || (await requestPosition());
 
       const response = await fetchRouteAssistant({
         query,
-        userLat: location.lat,
-        userLng: location.lng,
+        userLat: position.lat,
+        userLng: position.lng,
         localSpots: draftSpot
           ? [
               {
@@ -367,85 +304,169 @@ export default function HomeScreen() {
           : []
       });
 
-      setRouteState({
-        status: "ready",
-        response,
-        message: response.answer || "Trasa gotowa."
-      });
+      setRouteResult(response);
+
+      if (response.recommendedSpot) {
+        setMessage(
+          `Prowadzę do koperty. ${response.spotDistanceToDestinationLabel || ""} od celu.`
+        );
+        playVoiceCommand("gtk_found_parking");
+      } else {
+        setMessage("Nie znaleziono koperty przy celu. Prowadzę do wskazanego adresu.");
+        playVoiceCommand("nav_route_ready");
+      }
+
+      const recommendedCoordinate = featureToLatLng(response.recommendedSpot);
+
+      if (recommendedCoordinate) {
+        mapRef.current?.animateToRegion(makeRegion(recommendedCoordinate), 500);
+      }
     } catch (error) {
-      const message =
+      const errorMessage =
         error instanceof Error ? error.message : "Nie udało się wyznaczyć trasy.";
 
-      setRouteState({
-        status: "error",
-        message
-      });
+      setMessage(errorMessage);
+      playVoiceCommand("route_no_route_found");
+    } finally {
+      setLoading(false);
     }
   }
 
-  async function handleCreateDraftSpot() {
+  async function handleStartNavigation() {
+    if (!routeResult) {
+      setMessage("Najpierw wyznacz trasę.");
+      return;
+    }
+
     try {
-      const location = await ensureLocation();
+      Keyboard.dismiss();
+      setLoading(true);
+
+      const position = currentPosition || (await requestPosition());
+
+      setNavigationActive(true);
+      setPanelExpanded(false);
+      setMessage("Nawigacja uruchomiona.");
+      playVoiceCommand("nav_navigation_start");
+
+      if (locationWatchRef.current) {
+        locationWatchRef.current.remove();
+        locationWatchRef.current = null;
+      }
+
+      locationWatchRef.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 2500,
+          distanceInterval: 8
+        },
+        (nextPosition) => {
+          const updated: Position = {
+            lat: nextPosition.coords.latitude,
+            lng: nextPosition.coords.longitude,
+            accuracy: nextPosition.coords.accuracy
+          };
+
+          setCurrentPosition(updated);
+          mapRef.current?.animateToRegion(makeRegion(toLatLng(updated)), 300);
+        }
+      );
+
+      mapRef.current?.animateToRegion(makeRegion(toLatLng(position)), 300);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Nie udało się uruchomić nawigacji.";
+
+      setMessage(errorMessage);
+      playVoiceCommand("route_network_error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleStopNavigation() {
+    if (locationWatchRef.current) {
+      locationWatchRef.current.remove();
+      locationWatchRef.current = null;
+    }
+
+    setNavigationActive(false);
+    setPanelExpanded(true);
+    setMessage("Nawigacja zatrzymana.");
+    playVoiceCommand("nav_navigation_stop");
+  }
+
+  async function handleAddDraftEnvelope() {
+    try {
+      Keyboard.dismiss();
+      setLoading(true);
+
+      const position = currentPosition || (await requestPosition());
+
       const draft: DraftSpot = {
         id: `mobile-${Date.now()}`,
-        lat: location.lat,
-        lng: location.lng,
+        lat: position.lat,
+        lng: position.lng,
         status: "draft"
       };
 
       setDraftSpot(draft);
-      setOsmMessage(
-        "Dodano lokalny szkic koperty. Możesz go wysłać do OSM po zalogowaniu."
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Nie udało się utworzyć szkicu.";
+      setMessage("Dodano szkic koperty z aktualnej pozycji.");
+      setPanelExpanded(true);
 
-      setOsmMessage(message);
+      mapRef.current?.animateToRegion(makeRegion(toLatLng(position)), 300);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Nie udało się dodać szkicu koperty.";
+
+      setMessage(errorMessage);
+    } finally {
+      setLoading(false);
     }
   }
 
-  async function handleOsmLogin() {
+  async function handleOsmLoginOrLogout() {
     try {
-      setOsmLoading(true);
-      setOsmMessage("Otwieram logowanie OpenStreetMap...");
+      Keyboard.dismiss();
+      setLoading(true);
+
+      if (osmUser) {
+        await clearStoredOsmSession();
+        setOsmUser(null);
+        setMessage("Wylogowano z OpenStreetMap.");
+        return;
+      }
 
       const me = await loginWithOsm();
 
       if (me.authenticated && me.user) {
         setOsmUser(me.user);
-        setOsmMessage(`Zalogowano OSM: ${me.user.displayName || me.user.id}`);
+        setMessage(`Zalogowano OSM: ${me.user.displayName || me.user.id}`);
       } else {
-        setOsmUser(null);
-        setOsmMessage("Nie udało się potwierdzić logowania OSM.");
+        setMessage("Nie udało się potwierdzić logowania OSM.");
       }
     } catch (error) {
-      const message =
+      const errorMessage =
         error instanceof Error ? error.message : "Nie udało się zalogować OSM.";
 
-      setOsmMessage(message);
+      setMessage(errorMessage);
     } finally {
-      setOsmLoading(false);
+      setLoading(false);
     }
   }
 
-  async function handleOsmLogout() {
-    await clearStoredOsmSession();
-    setOsmUser(null);
-    setOsmMessage("Wylogowano z OpenStreetMap w aplikacji mobilnej.");
-  }
-
-  async function handleSubmitDraftToOsm() {
+  async function handleSubmitDraftEnvelope() {
     if (!draftSpot) {
-      setOsmMessage("Najpierw dodaj lokalny szkic koperty.");
+      setMessage("Najpierw dodaj szkic koperty.");
       return;
     }
 
     try {
+      Keyboard.dismiss();
       setSubmitLoading(true);
-      setOsmMessage("Wysyłam kopertę do OpenStreetMap...");
 
       if (!osmUser) {
+        setMessage("Zaloguj się do OpenStreetMap przed wysłaniem koperty.");
         const me = await loginWithOsm();
 
         if (me.authenticated && me.user) {
@@ -461,534 +482,516 @@ export default function HomeScreen() {
         localSpotId: draftSpot.id
       });
 
-      setDraftSpot({
+      const submittedDraft: DraftSpot = {
         ...draftSpot,
         status: "submitted_to_osm",
         osmUrl: result.osmUrl,
         osmNodeId: result.nodeId,
         osmChangesetId: result.changesetId
-      });
+      };
 
-      setOsmMessage(
-        `Koperta wysłana do OSM. Node: ${result.nodeId}, changeset: ${result.changesetId}.`
-      );
+      setDraftSpot(submittedDraft);
+      setMessage(`Koperta wysłana do OSM. Node: ${result.nodeId || "brak danych"}.`);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Nie udało się wysłać koperty.";
+      const errorMessage =
+        error instanceof Error ? error.message : "Nie udało się wysłać koperty do OSM.";
 
-      setOsmMessage(message);
+      setMessage(errorMessage);
     } finally {
       setSubmitLoading(false);
     }
   }
 
-  const userCoordinate =
-    locationState.status === "ready"
-      ? {
-          latitude: locationState.latitude,
-          longitude: locationState.longitude
-        }
-      : null;
+  const userCoordinate = currentPosition ? toLatLng(currentPosition) : null;
+  const recommendedCoordinate = featureToLatLng(routeResult?.recommendedSpot);
+  const draftCoordinate = draftSpot
+    ? {
+        latitude: draftSpot.lat,
+        longitude: draftSpot.lng
+      }
+    : null;
 
-  const routeResponse =
-    routeState.status === "ready" ? routeState.response : null;
-
-  const recommendedCoordinate = featureToLatLng(routeResponse?.recommendedSpot);
-  const draftCoordinate = draftToLatLng(draftSpot);
   const routeLine = useMemo(() => {
-    if (!routeResponse) {
+    if (!routeResult) {
       return [];
     }
 
-    const toSpot = routeCoordinatesToLatLng(routeResponse.routeToSpotCoordinates);
+    const toSpot = routeCoordinatesToLatLng(routeResult.routeToSpotCoordinates);
 
     if (toSpot.length > 1) {
       return toSpot;
     }
 
-    return routeCoordinatesToLatLng(routeResponse.routeCoordinates);
-  }, [routeResponse]);
+    const primary = routeCoordinatesToLatLng(routeResult.routeCoordinates);
 
-  const mapCenter =
-    recommendedCoordinate ||
-    draftCoordinate ||
-    routeLine[0] ||
-    userCoordinate ||
-    null;
+    if (primary.length > 1) {
+      return primary;
+    }
 
-  const mapRegion = getInitialRegion(mapCenter);
+    return routeCoordinatesToLatLng(routeResult.routeToDestinationCoordinates);
+  }, [routeResult]);
 
-  const alternativeMarkers = (routeResponse?.alternatives || [])
-    .slice(0, 5)
-    .map((feature, index) => ({
-      feature,
-      index,
-      coordinate: featureToLatLng(feature)
-    }))
-    .filter((item): item is {
-      feature: ParkingFeature;
-      index: number;
-      coordinate: LatLng;
-    } => Boolean(item.coordinate));
+  const destinationCoordinate =
+    routeResult?.destination
+      ? {
+          latitude: routeResult.destination.lat,
+          longitude: routeResult.destination.lng
+        }
+      : null;
+
+  const routeLabel = routeResult?.routeSummary
+    ? `${routeResult.routeSummary.distanceLabel} · ${routeResult.routeSummary.durationLabel}`
+    : null;
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.heroCard}>
-          <Text style={styles.kicker}>Gdzie ta koperta?</Text>
-          <Text style={styles.title}>Nawigacja do dostępnego postoju</Text>
-          <Text style={styles.description}>
-            Wpisz cel podróży. Aplikacja znajdzie miejsce docelowe, sprawdzi koperty
-            w pobliżu i poprowadzi do rekomendowanej koperty.
-          </Text>
-        </View>
+    <View style={styles.screen}>
+      <MapView
+        ref={mapRef}
+        style={styles.map}
+        region={mapRegion}
+        onRegionChangeComplete={setMapRegion}
+        showsUserLocation
+        showsMyLocationButton={false}
+      >
+        {userCoordinate ? (
+          <Marker coordinate={userCoordinate} title="Twoja pozycja" pinColor="#2563eb" />
+        ) : null}
 
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Cel podróży</Text>
-          <TextInput
-            value={destinationQuery}
-            onChangeText={setDestinationQuery}
-            placeholder="np. Żeromskiego, Sosnowiec"
-            placeholderTextColor="#6b7280"
-            autoCapitalize="sentences"
-            returnKeyType="search"
-            onSubmitEditing={handleFindRoute}
-            style={styles.input}
+        {destinationCoordinate ? (
+          <Marker coordinate={destinationCoordinate} title="Cel podróży" />
+        ) : null}
+
+        {recommendedCoordinate ? (
+          <Marker
+            coordinate={recommendedCoordinate}
+            title="Rekomendowana koperta"
+            description={routeResult?.spotDistanceToDestinationLabel || undefined}
+            pinColor="#16a34a"
           />
+        ) : null}
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.primaryButton,
-              pressed ? styles.buttonPressed : null
-            ]}
-            onPress={handleFindRoute}
-          >
-            <Text style={styles.primaryButtonText}>Znajdź kopertę i trasę</Text>
-          </Pressable>
+        {draftCoordinate ? (
+          <Marker
+            coordinate={draftCoordinate}
+            title={
+              draftSpot?.status === "submitted_to_osm"
+                ? "Koperta wysłana do OSM"
+                : "Szkic koperty"
+            }
+            pinColor="#f97316"
+          />
+        ) : null}
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.secondaryButton,
-              pressed ? styles.buttonPressed : null
-            ]}
-            onPress={handleLoadNearbyParking}
-          >
-            <Text style={styles.secondaryButtonText}>Pokaż koperty w okolicy</Text>
-          </Pressable>
-        </View>
+        {nearbyParking.map((feature, index) => {
+          const coordinate = featureToLatLng(feature);
 
-        <View style={styles.mapCard}>
-          <MapView
-            style={styles.map}
-            region={mapRegion}
-            showsUserLocation={locationState.status === "ready"}
-            showsMyLocationButton
-          >
-            {userCoordinate ? (
-              <Marker coordinate={userCoordinate} title="Twoja pozycja" />
-            ) : null}
+          if (!coordinate) {
+            return null;
+          }
 
-            {recommendedCoordinate ? (
-              <Marker
-                coordinate={recommendedCoordinate}
-                title="Rekomendowana koperta"
-                description={routeResponse?.spotDistanceToDestinationLabel || undefined}
-              />
-            ) : null}
+          return (
+            <Marker
+              key={getFeatureKey(feature, index)}
+              coordinate={coordinate}
+              title={getParkingFeatureTitle(feature)}
+              description={formatDistanceMeters(feature.properties?.distanceMeters)}
+              pinColor="#0f766e"
+            />
+          );
+        })}
 
-            {draftCoordinate ? (
-              <Marker
-                coordinate={draftCoordinate}
-                title={
-                  draftSpot?.status === "submitted_to_osm"
-                    ? "Koperta wysłana do OSM"
-                    : "Nowy szkic koperty"
-                }
-              />
-            ) : null}
+        {routeLine.length > 1 ? (
+          <Polyline coordinates={routeLine} strokeWidth={5} />
+        ) : null}
+      </MapView>
 
-            {alternativeMarkers.map(({ coordinate, feature, index }) => (
-              <Marker
-                key={getFeatureKey(feature, index)}
-                coordinate={coordinate}
-                title={`${index + 1}. ${getParkingFeatureTitle(feature)}`}
-                description={formatDistanceMeters(feature.properties?.distanceMeters)}
-              />
-            ))}
+      <SafeAreaView pointerEvents="box-none" style={styles.safeArea}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          pointerEvents="box-none"
+          style={styles.overlay}
+        >
+          {navigationActive && !panelExpanded ? (
+            <View style={styles.miniPanel}>
+              <Pressable
+                style={styles.miniInfo}
+                onPress={() => setPanelExpanded(true)}
+              >
+                <Text style={styles.miniTitle}>Nawigacja</Text>
+                <Text style={styles.miniText} numberOfLines={1}>
+                  {routeLabel || message}
+                </Text>
+              </Pressable>
 
-            {routeLine.length > 1 ? (
-              <Polyline coordinates={routeLine} strokeWidth={5} />
-            ) : null}
-          </MapView>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Status nawigacji</Text>
-          <Text style={styles.statusText}>{routeState.message}</Text>
-
-          <View style={styles.voiceControls}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                styles.flexButton,
-                pressed ? styles.buttonPressed : null
-              ]}
-              onPress={() => playVoiceCommand("nav_route_ready")}
-            >
-              <Text style={styles.secondaryButtonText}>Test głosu</Text>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                styles.flexButton,
-                pressed ? styles.buttonPressed : null
-              ]}
-              onPress={() => playVoiceCommand("nav_turn_right")}
-            >
-              <Text style={styles.secondaryButtonText}>Test manewru</Text>
-            </Pressable>
-          </View>
-
-          {lastCommandId ? (
-            <Text style={styles.metaText}>Ostatni komunikat: {lastCommandId}</Text>
-          ) : null}
-
-          {voiceError ? (
-            <Text style={styles.errorText}>{voiceError}</Text>
-          ) : null}
-
-          {routeState.status === "loading" ? (
-            <ActivityIndicator style={styles.loader} />
-          ) : null}
-
-          {routeState.status === "ready" && routeState.response.destination ? (
-            <View style={styles.resultBox}>
-              <Text style={styles.resultTitle}>Cel</Text>
-              <Text style={styles.resultText}>
-                {routeState.response.destination.name}
-              </Text>
-
-              <Text style={styles.resultTitle}>Trasa</Text>
-              <Text style={styles.resultText}>
-                {routeState.response.routeSummary?.distanceLabel || "brak dystansu"} ·{" "}
-                {routeState.response.routeSummary?.durationLabel || "brak czasu"}
-              </Text>
-
-              <Text style={styles.resultTitle}>Rekomendacja</Text>
-              <Text style={styles.resultText}>
-                {routeState.response.recommendedSpot
-                  ? `${getParkingFeatureTitle(
-                      routeState.response.recommendedSpot
-                    )} · ${routeState.response.spotDistanceToDestinationLabel}`
-                  : "Brak oznaczonej koperty w promieniu 5 km od celu."}
-              </Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.miniStopButton,
+                  pressed ? styles.buttonPressed : null
+                ]}
+                onPress={handleStopNavigation}
+              >
+                <Text style={styles.miniStopText}>Stop</Text>
+              </Pressable>
             </View>
-          ) : null}
-        </View>
+          ) : (
+            <View style={styles.bottomSheet}>
+              <View style={styles.sheetHandle} />
 
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Koperty w okolicy</Text>
-          <Text style={styles.statusText}>{nearbyState.message}</Text>
+              <Text style={styles.label}>Cel podróży</Text>
 
-          {nearbyState.status === "loading" ? (
-            <ActivityIndicator style={styles.loader} />
-          ) : null}
+              <View style={styles.inputRow}>
+                <TextInput
+                  value={destinationQuery}
+                  onChangeText={setDestinationQuery}
+                  placeholder="Dokąd jedziesz?"
+                  placeholderTextColor="#94a3b8"
+                  returnKeyType="search"
+                  onSubmitEditing={handleFindRoute}
+                  style={styles.input}
+                />
 
-          {nearbyState.status === "ready" ? (
-            <View style={styles.list}>
-              <Text style={styles.metaText}>
-                Źródło: {nearbyState.response.metadata?.sourceStatus || "brak danych"}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.showButton,
+                    pressed ? styles.buttonPressed : null
+                  ]}
+                  onPress={handleFindRoute}
+                  disabled={loading}
+                >
+                  <Text style={styles.showButtonText}>Pokaż</Text>
+                </Pressable>
+              </View>
+
+              <Text style={styles.message} numberOfLines={2}>
+                {loading ? "Pracuję..." : message}
               </Text>
 
-              {nearbyState.visibleFeatures.map((feature, index) => (
-                <View key={getFeatureKey(feature, index)} style={styles.listItem}>
-                  <Text style={styles.listTitle}>
-                    {index + 1}. {getParkingFeatureTitle(feature)}
-                  </Text>
-                  <Text style={styles.listMeta}>
-                    {formatDistanceMeters(feature.properties?.distanceMeters)}
-                    {feature.properties?.osmId
-                      ? ` · OSM ${feature.properties.osmType || "node"} ${
-                          feature.properties.osmId
-                        }`
-                      : ""}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-        </View>
+              {voiceError ? (
+                <Text style={styles.errorText} numberOfLines={1}>
+                  {voiceError}
+                </Text>
+              ) : null}
 
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Dodaj kopertę</Text>
-          <Text style={styles.statusText}>
-            Dodanie koperty tworzy lokalny szkic z aktualnej pozycji. Wysłanie do OSM
-            idzie przez Vercel, zapisuje ślad w Neon i tworzy node w OpenStreetMap.
-          </Text>
+              <View style={styles.compactActions}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.compactButton,
+                    pressed ? styles.buttonPressed : null
+                  ]}
+                  onPress={handleUseLocation}
+                  disabled={loading}
+                >
+                  <Text style={styles.compactButtonText}>Lokalizacja</Text>
+                </Pressable>
 
-          {draftSpot ? (
-            <View style={styles.resultBox}>
-              <Text style={styles.resultTitle}>Szkic</Text>
-              <Text style={styles.resultText}>
-                Lat: {draftSpot.lat.toFixed(6)} · Lng: {draftSpot.lng.toFixed(6)}
-              </Text>
-              <Text style={styles.resultText}>Status: {draftSpot.status}</Text>
-              {draftSpot.osmUrl ? (
-                <Text style={styles.resultText}>OSM: {draftSpot.osmUrl}</Text>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.compactButton,
+                    styles.addButton,
+                    pressed ? styles.buttonPressed : null
+                  ]}
+                  onPress={handleAddDraftEnvelope}
+                  disabled={loading}
+                >
+                  <Text style={styles.addButtonText}>Dodaj</Text>
+                </Pressable>
+
+                {navigationActive ? (
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.compactButton,
+                      styles.stopButton,
+                      pressed ? styles.buttonPressed : null
+                    ]}
+                    onPress={handleStopNavigation}
+                  >
+                    <Text style={styles.stopButtonText}>Stop</Text>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.compactButton,
+                      styles.navButton,
+                      (!routeResult || loading) ? styles.disabledButton : null,
+                      pressed ? styles.buttonPressed : null
+                    ]}
+                    onPress={handleStartNavigation}
+                    disabled={!routeResult || loading}
+                  >
+                    <Text style={styles.navButtonText}>Nawiguj</Text>
+                  </Pressable>
+                )}
+              </View>
+
+              <View style={styles.secondaryActions}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.secondaryButton,
+                    pressed ? styles.buttonPressed : null
+                  ]}
+                  onPress={handleOsmLoginOrLogout}
+                  disabled={loading}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    {osmUser ? "OSM połączone" : "Zaloguj OSM"}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.secondaryButton,
+                    styles.submitButton,
+                    (!draftSpot || submitLoading) ? styles.disabledButton : null,
+                    pressed ? styles.buttonPressed : null
+                  ]}
+                  onPress={handleSubmitDraftEnvelope}
+                  disabled={!draftSpot || submitLoading}
+                >
+                  {submitLoading ? (
+                    <ActivityIndicator />
+                  ) : (
+                    <Text style={styles.submitButtonText}>Wyślij do OSM</Text>
+                  )}
+                </Pressable>
+              </View>
+
+              {routeLabel ? (
+                <Text style={styles.metaText}>Trasa: {routeLabel}</Text>
+              ) : null}
+
+              {draftSpot ? (
+                <Text style={styles.metaText}>
+                  Szkic: {draftSpot.status === "submitted_to_osm" ? "wysłany" : "lokalny"}
+                </Text>
+              ) : null}
+
+              {navigationActive ? (
+                <Pressable
+                  style={styles.collapseButton}
+                  onPress={() => setPanelExpanded(false)}
+                >
+                  <Text style={styles.collapseButtonText}>Schowaj panel</Text>
+                </Pressable>
               ) : null}
             </View>
-          ) : null}
-
-          <Text style={styles.statusText}>{osmMessage}</Text>
-
-          <View style={styles.buttonRow}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                styles.flexButton,
-                pressed ? styles.buttonPressed : null
-              ]}
-              onPress={handleCreateDraftSpot}
-            >
-              <Text style={styles.secondaryButtonText}>Dodaj z mojej pozycji</Text>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                styles.flexButton,
-                pressed ? styles.buttonPressed : null
-              ]}
-              onPress={osmUser ? handleOsmLogout : handleOsmLogin}
-              disabled={osmLoading}
-            >
-              <Text style={styles.secondaryButtonText}>
-                {osmLoading
-                  ? "Logowanie..."
-                  : osmUser
-                    ? "Wyloguj OSM"
-                    : "Zaloguj OSM"}
-              </Text>
-            </Pressable>
-          </View>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.primaryButton,
-              pressed || submitLoading ? styles.buttonPressed : null
-            ]}
-            onPress={handleSubmitDraftToOsm}
-            disabled={submitLoading}
-          >
-            <Text style={styles.primaryButtonText}>
-              {submitLoading ? "Wysyłam..." : "Wyślij kopertę do OSM"}
-            </Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Lokalizacja</Text>
-          <Text style={styles.statusText}>{locationState.message}</Text>
-
-          {locationState.status === "loading" ? (
-            <ActivityIndicator style={styles.loader} />
-          ) : null}
-
-          {locationState.status === "ready" ? (
-            <View style={styles.coords}>
-              <Text style={styles.coordText}>
-                Lat: {locationState.latitude.toFixed(6)}
-              </Text>
-              <Text style={styles.coordText}>
-                Lng: {locationState.longitude.toFixed(6)}
-              </Text>
-              <Text style={styles.coordText}>
-                Dokładność:{" "}
-                {locationState.accuracy === null
-                  ? "brak danych"
-                  : `${Math.round(locationState.accuracy)} m`}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+          )}
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#f4f7fb"
-  },
-  scrollContent: {
-    padding: 16,
-    gap: 14
-  },
-  heroCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 24,
-    padding: 22,
-    gap: 12,
-    shadowColor: "#000000",
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 4
-  },
-  card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 22,
-    padding: 18,
-    gap: 12,
-    shadowColor: "#000000",
-    shadowOpacity: 0.06,
-    shadowRadius: 14,
-    elevation: 3
-  },
-  mapCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 22,
-    padding: 6,
-    overflow: "hidden",
-    height: 360,
-    shadowColor: "#000000",
-    shadowOpacity: 0.06,
-    shadowRadius: 14,
-    elevation: 3
+    backgroundColor: "#dbeafe"
   },
   map: {
-    flex: 1,
-    borderRadius: 18
+    ...StyleSheet.absoluteFillObject
   },
-  kicker: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#2563eb",
-    textTransform: "uppercase",
-    letterSpacing: 0.8
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "900",
-    color: "#111827"
-  },
-  description: {
-    fontSize: 16,
-    lineHeight: 23,
-    color: "#4b5563"
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#111827"
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#f8fafc",
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 16,
-    color: "#111827"
-  },
-  primaryButton: {
-    backgroundColor: "#2563eb",
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: "center"
-  },
-  secondaryButton: {
-    backgroundColor: "#eef2ff",
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    alignItems: "center"
-  },
-  buttonPressed: {
-    opacity: 0.75
-  },
-  primaryButtonText: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "900"
-  },
-  secondaryButtonText: {
-    color: "#1d4ed8",
-    fontSize: 15,
-    fontWeight: "900"
-  },
-  buttonRow: {
-    flexDirection: "row",
-    gap: 10
-  },
-  flexButton: {
+  safeArea: {
     flex: 1
   },
-  statusText: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: "#374151"
+  overlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    paddingHorizontal: 14,
+    paddingBottom: 12
   },
-  loader: {
-    alignSelf: "flex-start",
-    marginTop: 2
-  },
-  resultBox: {
-    backgroundColor: "#eef2ff",
-    borderRadius: 16,
+  bottomSheet: {
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderRadius: 28,
     padding: 14,
-    gap: 6
+    gap: 9,
+    shadowColor: "#000000",
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    elevation: 8
   },
-  resultTitle: {
+  sheetHandle: {
+    width: 46,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "#cbd5e1",
+    alignSelf: "center",
+    marginBottom: 2
+  },
+  label: {
+    color: "#1d4ed8",
     fontSize: 12,
-    color: "#3730a3",
     fontWeight: "900",
+    letterSpacing: 1,
     textTransform: "uppercase"
   },
-  resultText: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: "#111827"
-  },
-  list: {
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8
   },
-  metaText: {
-    fontSize: 13,
-    color: "#4b5563"
-  },
-  listItem: {
+  input: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 16,
     backgroundColor: "#f8fafc",
-    borderRadius: 12,
-    padding: 12,
-    gap: 4
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    paddingHorizontal: 13,
+    fontSize: 16,
+    color: "#0f172a",
+    fontWeight: "700"
   },
-  listTitle: {
+  showButton: {
+    minHeight: 46,
+    borderRadius: 16,
+    backgroundColor: "#2563eb",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 17
+  },
+  showButtonText: {
+    color: "#ffffff",
     fontSize: 15,
-    fontWeight: "900",
-    color: "#111827"
+    fontWeight: "900"
   },
-  listMeta: {
+  message: {
+    color: "#334155",
     fontSize: 13,
-    color: "#4b5563"
-  },
-  coords: {
-    gap: 4
-  },
-  coordText: {
-    fontSize: 14,
-    color: "#111827",
-    fontVariant: ["tabular-nums"]
-  },
-  voiceControls: {
-    flexDirection: "row",
-    gap: 10
+    lineHeight: 19
   },
   errorText: {
-    fontSize: 13,
     color: "#b91c1c",
+    fontSize: 12,
     fontWeight: "800"
+  },
+  compactActions: {
+    flexDirection: "row",
+    gap: 7
+  },
+  compactButton: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 15,
+    backgroundColor: "#f1f5f9",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6
+  },
+  compactButtonText: {
+    color: "#1e293b",
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  addButton: {
+    backgroundColor: "#16a34a"
+  },
+  addButtonText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  navButton: {
+    backgroundColor: "#2563eb"
+  },
+  navButtonText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  stopButton: {
+    backgroundColor: "#fee2e2"
+  },
+  stopButtonText: {
+    color: "#991b1b",
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  secondaryActions: {
+    flexDirection: "row",
+    gap: 7
+  },
+  secondaryButton: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 15,
+    backgroundColor: "#f8fafc",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8
+  },
+  secondaryButtonText: {
+    color: "#166534",
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  submitButton: {
+    backgroundColor: "#2563eb"
+  },
+  submitButtonText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  disabledButton: {
+    opacity: 0.42
+  },
+  buttonPressed: {
+    opacity: 0.72
+  },
+  metaText: {
+    color: "#0f172a",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  collapseButton: {
+    alignSelf: "center",
+    paddingVertical: 3,
+    paddingHorizontal: 10
+  },
+  collapseButtonText: {
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  miniPanel: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderRadius: 24,
+    padding: 10,
+    shadowColor: "#000000",
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    elevation: 8
+  },
+  miniInfo: {
+    flex: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 5
+  },
+  miniTitle: {
+    color: "#1d4ed8",
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.7
+  },
+  miniText: {
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  miniStopButton: {
+    minHeight: 42,
+    borderRadius: 16,
+    backgroundColor: "#fee2e2",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20
+  },
+  miniStopText: {
+    color: "#991b1b",
+    fontSize: 13,
+    fontWeight: "900"
   }
 });
