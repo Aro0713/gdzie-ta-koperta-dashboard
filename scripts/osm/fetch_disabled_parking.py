@@ -471,7 +471,7 @@ def normalize_area_features(
 
 
 def build_dataset() -> gpd.GeoDataFrame:
-    ox.settings.use_cache = True
+    ox.settings.use_cache = False
     ox.settings.log_console = True
     ox.settings.timeout = 240
 
@@ -511,15 +511,10 @@ def build_dataset() -> gpd.GeoDataFrame:
             label=f"{area['id']} capacity:disabled",
         )
 
-        display_capacity_gdf = filter_parkings_covered_by_exact_spaces(
-            public_capacity_gdf,
-            disabled_spaces_gdf=public_disabled_spaces_gdf,
-            label=f"{area['id']} capacity:disabled",
-        )
 
         all_records.extend(
             normalize_area_features(
-                display_capacity_gdf,
+                public_capacity_gdf,
                 area=area,
                 object_type_hint="parking_with_disabled_capacity",
                 synced_at=synced_at,
@@ -556,7 +551,6 @@ def build_dataset() -> gpd.GeoDataFrame:
     ).reset_index(drop=True)
 
     return output
-
 
 def write_outputs(gdf: gpd.GeoDataFrame) -> None:
     PUBLIC_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -616,7 +610,7 @@ def write_outputs(gdf: gpd.GeoDataFrame) -> None:
     metadata = {
         "generatedAt": now_iso(),
         "country": "Poland",
-        "strategy": "voivodeship-snapshot-public-access-deduped",
+        "strategy": "voivodeship-snapshot-public-access-with-parking-context",
         "count": int(len(gdf)),
         "exactDisabledParkingSpaces": exact_count,
         "parkingsWithDisabledCapacity": parking_count,
@@ -636,8 +630,8 @@ def write_outputs(gdf: gpd.GeoDataFrame) -> None:
             "OSM-first Poland snapshot generated from OpenStreetMap data via "
             "OSMnx/Overpass. User location is used only to filter 5 km in the "
             "application. Non-public parking objects are filtered out. Parking "
-            "objects with mapped exact disabled parking spaces are not displayed "
-            "as aggregate parking objects."
+            "objects with capacity:disabled are kept as aggregate parking context, "
+            "even when exact disabled parking spaces are also mapped nearby."
         ),
     }
 
