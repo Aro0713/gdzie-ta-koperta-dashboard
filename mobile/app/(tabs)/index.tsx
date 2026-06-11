@@ -44,6 +44,7 @@ type Position = {
   lat: number;
   lng: number;
   accuracy: number | null;
+  heading: number | null;
 };
 
 type DraftSpot = {
@@ -56,7 +57,11 @@ type DraftSpot = {
   osmChangesetId?: string;
 };
 
+type NavigationCameraMode = "heading" | "north";
+
 const DEFAULT_CENTER: LngLat = [21.017532, 52.237049];
+const REROUTE_DISTANCE_METERS = 75;
+const REROUTE_MIN_INTERVAL_MS = 6000;
 
 const OSM_RASTER_STYLE = {
   version: 8 as 8,
@@ -133,6 +138,26 @@ function routeCoordinatesToLngLat(values?: unknown[]) {
     .filter((coordinate): coordinate is LngLat => Boolean(coordinate));
 }
 
+function getPreferredRoute(response: RouteAssistantResponse | null) {
+  if (!response) {
+    return [];
+  }
+
+  const toSpot = routeCoordinatesToLngLat(response.routeToSpotCoordinates);
+
+  if (toSpot.length > 1) {
+    return toSpot;
+  }
+
+  const primary = routeCoordinatesToLngLat(response.routeCoordinates);
+
+  if (primary.length > 1) {
+    return primary;
+  }
+
+  return routeCoordinatesToLngLat(response.routeToDestinationCoordinates);
+}
+
 function getFeatureKey(feature: ParkingFeature, index: number) {
   const properties = feature.properties || {};
   const osmType = properties.osmType || "node";
@@ -161,9 +186,92 @@ function getLngLatBounds(points: LngLat[]) {
   ] as [number, number, number, number];
 }
 
+function toRadians(value: number) {
+  return (value * Math.PI) / 180;
+}
+
+function haversineMeters(first: LngLat, second: LngLat) {
+  const earthRadiusMeters = 6371000;
+  const dLat = toRadians(second[1] - first[1]);
+  const dLng = toRadians(second[0] - first[0]);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(first[1])) *
+      Math.cos(toRadians(second[1])) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function projectMeters(point: LngLat, origin: LngLat) {
+  const earthRadiusMeters = 6371000;
+  const x =
+    toRadians(point[0] - origin[0]) *
+    Math.cos(toRadians(origin[1])) *
+    earthRadiusMeters;
+  const y = toRadians(point[1] - origin[1]) * earthRadiusMeters;
+
+  return { x, y };
+}
+
+function distancePointToSegmentMeters(point: LngLat, start: LngLat, end: LngLat) {
+  const p = projectMeters(point, point);
+  const a = projectMeters(start, point);
+  const b = projectMeters(end, point);
+
+  const abX = b.x - a.x;
+  const abY = b.y - a.y;
+  const apX = p.x - a.x;
+  const apY = p.y - a.y;
+  const abLengthSquared = abX * abX + abY * abY;
+
+  if (abLengthSquared === 0) {
+    return haversineMeters(point, start);
+  }
+
+  const t = Math.max(0, Math.min(1, (apX * abX + apY * abY) / abLengthSquared));
+  const closestX = a.x + abX * t;
+  const closestY = a.y + abY * t;
+
+  return Math.sqrt((p.x - closestX) ** 2 + (p.y - closestY) ** 2);
+}
+
+function distanceToRouteMeters(point: LngLat, route: LngLat[]) {
+  if (route.length < 2) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  let minDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 1; index < route.length; index += 1) {
+    const distance = distancePointToSegmentMeters(
+      point,
+      route[index - 1],
+      route[index]
+    );
+
+    if (distance < minDistance) {
+      minDistance = distance;
+    }
+  }
+
+  return minDistance;
+}
+
 export default function HomeScreen() {
   const cameraRef = useRef<CameraRef | null>(null);
   const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
+
+  const routeLineRef = useRef<LngLat[]>([]);
+  const rerouteInProgressRef = useRef(false);
+  const lastRerouteAtRef = useRef(0);
+  const navigationActiveRef = useRef(false);
+  const destinationQueryRef = useRef("");
+  const draftSpotRef = useRef<DraftSpot | null>(null);
+  const osmUserRef = useRef<OsmMobileUser | null>(null);
+  const cameraModeRef = useRef<NavigationCameraMode>("heading");
 
   const [destinationQuery, setDestinationQuery] = useState("");
   const [currentPosition, setCurrentPosition] = useState<Position | null>(null);
@@ -172,14 +280,63 @@ export default function HomeScreen() {
   const [draftSpot, setDraftSpot] = useState<DraftSpot | null>(null);
 
   const [osmUser, setOsmUser] = useState<OsmMobileUser | null>(null);
-  const [message, setMessage] = useState("Dokąd jedziesz?");
+  const [message, setMessage] = useState("Wyszukaj cel podróży.");
   const [loading, setLoading] = useState(false);
   const [navigationActive, setNavigationActive] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
-  const [sheetExpanded, setSheetExpanded] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [cameraMode, setCameraMode] = useState<NavigationCameraMode>("heading");
 
   const { playVoiceCommand, voiceError } = useNavigationVoice();
+
+  const routeLine = useMemo(() => getPreferredRoute(routeResult), [routeResult]);
+
+  const routeGeoJson = useMemo(() => {
+    if (routeLine.length <= 1) {
+      return {
+        type: "FeatureCollection" as const,
+        features: []
+      };
+    }
+
+    return {
+      type: "FeatureCollection" as const,
+      features: [
+        {
+          type: "Feature" as const,
+          properties: {},
+          geometry: {
+            type: "LineString" as const,
+            coordinates: routeLine
+          }
+        }
+      ]
+    };
+  }, [routeLine]);
+
+  useEffect(() => {
+    routeLineRef.current = routeLine;
+  }, [routeLine]);
+
+  useEffect(() => {
+    navigationActiveRef.current = navigationActive;
+  }, [navigationActive]);
+
+  useEffect(() => {
+    destinationQueryRef.current = destinationQuery;
+  }, [destinationQuery]);
+
+  useEffect(() => {
+    draftSpotRef.current = draftSpot;
+  }, [draftSpot]);
+
+  useEffect(() => {
+    osmUserRef.current = osmUser;
+  }, [osmUser]);
+
+  useEffect(() => {
+    cameraModeRef.current = cameraMode;
+  }, [cameraMode]);
 
   useEffect(() => {
     let mounted = true;
@@ -200,21 +357,10 @@ export default function HomeScreen() {
       }
     }
 
-    const keyboardShow = Keyboard.addListener("keyboardDidShow", () => {
-      setKeyboardVisible(true);
-      setSheetExpanded(true);
-    });
-
-    const keyboardHide = Keyboard.addListener("keyboardDidHide", () => {
-      setKeyboardVisible(false);
-    });
-
     void loadOsmUser();
 
     return () => {
       mounted = false;
-      keyboardShow.remove();
-      keyboardHide.remove();
 
       if (locationWatchRef.current) {
         locationWatchRef.current.remove();
@@ -223,14 +369,59 @@ export default function HomeScreen() {
     };
   }, []);
 
-  function focusPoint(point: LngLat, zoom = 15) {
-    cameraRef.current?.easeTo({
-      center: point,
-      duration: 450
-    });
+  function setCamera(params: {
+    center: LngLat;
+    zoom?: number;
+    heading?: number | null;
+    duration?: number;
+  }) {
+    const mode = cameraModeRef.current;
+    const rawHeading = Number(params.heading);
+    const heading =
+      mode === "heading" && Number.isFinite(rawHeading) ? rawHeading : 0;
+    const duration = params.duration ?? 350;
+    const zoom = params.zoom ?? 16;
 
-    cameraRef.current?.zoomTo(zoom, {
-      duration: 450
+    const camera = cameraRef.current as unknown as {
+      setCamera?: (next: Record<string, unknown>) => void;
+      easeTo?: (next: { center: LngLat; duration?: number }) => void;
+      zoomTo?: (zoom: number, options?: { duration?: number }) => void;
+    } | null;
+
+    if (camera?.setCamera) {
+      camera.setCamera({
+        centerCoordinate: params.center,
+        zoomLevel: zoom,
+        heading,
+        bearing: heading,
+        animationDuration: duration,
+        animationMode: "easeTo"
+      });
+      return;
+    }
+
+    cameraRef.current?.easeTo({
+      center: params.center,
+      duration
+    });
+    cameraRef.current?.zoomTo(zoom, { duration });
+  }
+
+  function focusPoint(point: LngLat, zoom = 16, duration = 450) {
+    setCamera({
+      center: point,
+      zoom,
+      heading: 0,
+      duration
+    });
+  }
+
+  function focusNavigation(position: Position, duration = 260) {
+    setCamera({
+      center: positionToLngLat(position),
+      zoom: 17,
+      heading: position.heading,
+      duration
     });
   }
 
@@ -243,12 +434,12 @@ export default function HomeScreen() {
 
     cameraRef.current?.fitBounds(bounds, {
       padding: {
-        top: 80,
+        top: 120,
         right: 40,
-        bottom: 260,
+        bottom: 220,
         left: 40
       },
-      duration: 700
+      duration: 650
     });
   }
 
@@ -260,17 +451,18 @@ export default function HomeScreen() {
     }
 
     const position = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced
+      accuracy: Location.Accuracy.High
     });
 
     const nextPosition: Position = {
       lat: position.coords.latitude,
       lng: position.coords.longitude,
-      accuracy: position.coords.accuracy
+      accuracy: position.coords.accuracy,
+      heading: position.coords.heading
     };
 
     setCurrentPosition(nextPosition);
-    focusPoint(positionToLngLat(nextPosition), 15);
+    focusPoint(positionToLngLat(nextPosition), 16);
 
     return nextPosition;
   }
@@ -287,6 +479,110 @@ export default function HomeScreen() {
     return response;
   }
 
+  async function calculateRouteFromPosition(params: {
+    query: string;
+    position: Position;
+    isReroute?: boolean;
+  }) {
+    const draft = draftSpotRef.current;
+    const user = osmUserRef.current;
+
+    const response = await fetchRouteAssistant({
+      query: params.query,
+      userLat: params.position.lat,
+      userLng: params.position.lng,
+      localSpots: draft
+        ? [
+            {
+              id: draft.id,
+              lat: draft.lat,
+              lng: draft.lng,
+              status: draft.status,
+              osmUrl: draft.osmUrl || null,
+              osmNodeId: draft.osmNodeId || null,
+              addedByName: user?.displayName || null
+            }
+          ]
+        : []
+    });
+
+    setRouteResult(response);
+
+    const nextRouteLine = getPreferredRoute(response);
+
+    if (params.isReroute) {
+      setMessage("Trasa została przeliczona.");
+      playVoiceCommand("route_recalculated");
+      focusNavigation(params.position, 250);
+      return response;
+    }
+
+    if (response.recommendedSpot) {
+      setMessage(
+        `Prowadzę do koperty. ${response.spotDistanceToDestinationLabel || ""} od celu.`
+      );
+      playVoiceCommand("gtk_found_parking");
+    } else {
+      setMessage("Nie znaleziono koperty przy celu. Prowadzę do wskazanego adresu.");
+      playVoiceCommand("nav_route_ready");
+    }
+
+    if (nextRouteLine.length > 1) {
+      fitRoute(nextRouteLine);
+    }
+
+    return response;
+  }
+
+  async function maybeRerouteFromPosition(position: Position) {
+    if (!navigationActiveRef.current || rerouteInProgressRef.current) {
+      return;
+    }
+
+    const query = destinationQueryRef.current.trim();
+
+    if (!query) {
+      return;
+    }
+
+    const route = routeLineRef.current;
+
+    if (route.length < 2) {
+      return;
+    }
+
+    const distanceFromRoute = distanceToRouteMeters(positionToLngLat(position), route);
+
+    if (distanceFromRoute < REROUTE_DISTANCE_METERS) {
+      return;
+    }
+
+    const now = Date.now();
+
+    if (now - lastRerouteAtRef.current < REROUTE_MIN_INTERVAL_MS) {
+      return;
+    }
+
+    lastRerouteAtRef.current = now;
+    rerouteInProgressRef.current = true;
+
+    try {
+      setMessage("Przeliczam trasę...");
+      playVoiceCommand("route_recalculating");
+
+      await calculateRouteFromPosition({
+        query,
+        position,
+        isReroute: true
+      });
+    } catch {
+      setMessage("Nie udało się przeliczyć trasy.");
+      playVoiceCommand("route_no_route_found");
+    } finally {
+      rerouteInProgressRef.current = false;
+    }
+  }
+
   async function handleUseLocation() {
     try {
       setLoading(true);
@@ -296,7 +592,6 @@ export default function HomeScreen() {
       const response = await loadNearbyParking(position);
 
       setMessage(`Znaleziono ${response.features.length} kopert w promieniu 5 km.`);
-      setSheetExpanded(true);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Nie udało się pobrać lokalizacji.";
@@ -314,11 +609,11 @@ export default function HomeScreen() {
     if (!query) {
       setMessage("Wpisz cel podróży.");
       playVoiceCommand("nav_destination_needed");
-      setSheetExpanded(true);
       return;
     }
 
     Keyboard.dismiss();
+    setSearchFocused(false);
 
     try {
       setLoading(true);
@@ -327,64 +622,16 @@ export default function HomeScreen() {
 
       const position = currentPosition || (await requestPosition());
 
-      const response = await fetchRouteAssistant({
+      await calculateRouteFromPosition({
         query,
-        userLat: position.lat,
-        userLng: position.lng,
-        localSpots: draftSpot
-          ? [
-              {
-                id: draftSpot.id,
-                lat: draftSpot.lat,
-                lng: draftSpot.lng,
-                status: draftSpot.status,
-                osmUrl: draftSpot.osmUrl || null,
-                osmNodeId: draftSpot.osmNodeId || null,
-                addedByName: osmUser?.displayName || null
-              }
-            ]
-          : []
+        position
       });
-
-      setRouteResult(response);
-
-      if (response.recommendedSpot) {
-        setMessage(
-          `Prowadzę do koperty. ${response.spotDistanceToDestinationLabel || ""} od celu.`
-        );
-        playVoiceCommand("gtk_found_parking");
-      } else {
-        setMessage("Nie znaleziono koperty przy celu. Prowadzę do wskazanego adresu.");
-        playVoiceCommand("nav_route_ready");
-      }
-
-      const route = routeCoordinatesToLngLat(
-        response.routeToSpotCoordinates?.length
-          ? response.routeToSpotCoordinates
-          : response.routeCoordinates
-      );
-
-      if (route.length > 1) {
-        fitRoute(route);
-      } else {
-        const recommended = featureToLngLat(response.recommendedSpot);
-        const destination = response.destination
-          ? ([response.destination.lng, response.destination.lat] as LngLat)
-          : null;
-
-        if (recommended || destination) {
-          focusPoint(recommended || destination!, 15);
-        }
-      }
-
-      setSheetExpanded(true);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Nie udało się wyznaczyć trasy.";
 
       setMessage(errorMessage);
       playVoiceCommand("route_no_route_found");
-      setSheetExpanded(true);
     } finally {
       setLoading(false);
     }
@@ -393,18 +640,17 @@ export default function HomeScreen() {
   async function handleStartNavigation() {
     if (!routeResult) {
       setMessage("Najpierw wyznacz trasę.");
-      setSheetExpanded(true);
       return;
     }
 
     try {
       setLoading(true);
       Keyboard.dismiss();
+      setSearchFocused(false);
 
       const position = currentPosition || (await requestPosition());
 
       setNavigationActive(true);
-      setSheetExpanded(false);
       setMessage("Nawigacja uruchomiona.");
       playVoiceCommand("nav_navigation_start");
 
@@ -415,30 +661,31 @@ export default function HomeScreen() {
 
       locationWatchRef.current = await Location.watchPositionAsync(
         {
-          accuracy: Location.Accuracy.Balanced,
-          timeInterval: 2500,
-          distanceInterval: 8
+          accuracy: Location.Accuracy.High,
+          timeInterval: 1200,
+          distanceInterval: 4
         },
         (nextPosition) => {
           const updated: Position = {
             lat: nextPosition.coords.latitude,
             lng: nextPosition.coords.longitude,
-            accuracy: nextPosition.coords.accuracy
+            accuracy: nextPosition.coords.accuracy,
+            heading: nextPosition.coords.heading
           };
 
           setCurrentPosition(updated);
-          focusPoint(positionToLngLat(updated), 16);
+          focusNavigation(updated);
+          void maybeRerouteFromPosition(updated);
         }
       );
 
-      focusPoint(positionToLngLat(position), 16);
+      focusNavigation(position);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Nie udało się uruchomić nawigacji.";
 
       setMessage(errorMessage);
       playVoiceCommand("route_network_error");
-      setSheetExpanded(true);
     } finally {
       setLoading(false);
     }
@@ -451,15 +698,28 @@ export default function HomeScreen() {
     }
 
     setNavigationActive(false);
-    setSheetExpanded(true);
     setMessage("Nawigacja zatrzymana.");
     playVoiceCommand("nav_navigation_stop");
+  }
+
+  function toggleCameraMode() {
+    setCameraMode((current) => {
+      const next = current === "heading" ? "north" : "heading";
+      cameraModeRef.current = next;
+
+      if (currentPosition) {
+        focusNavigation(currentPosition, 250);
+      }
+
+      return next;
+    });
   }
 
   async function handleAddDraftEnvelope() {
     try {
       setLoading(true);
       Keyboard.dismiss();
+      setSearchFocused(false);
 
       const position = currentPosition || (await requestPosition());
 
@@ -472,14 +732,12 @@ export default function HomeScreen() {
 
       setDraftSpot(draft);
       setMessage("Dodano szkic koperty z aktualnej pozycji.");
-      setSheetExpanded(true);
-      focusPoint(positionToLngLat(position), 16);
+      focusPoint(positionToLngLat(position), 17);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Nie udało się dodać szkicu koperty.";
 
       setMessage(errorMessage);
-      setSheetExpanded(true);
     } finally {
       setLoading(false);
     }
@@ -511,14 +769,12 @@ export default function HomeScreen() {
       setMessage(errorMessage);
     } finally {
       setLoading(false);
-      setSheetExpanded(true);
     }
   }
 
   async function handleSubmitDraftEnvelope() {
     if (!draftSpot) {
       setMessage("Najpierw dodaj szkic koperty.");
-      setSheetExpanded(true);
       return;
     }
 
@@ -558,7 +814,6 @@ export default function HomeScreen() {
       setMessage(errorMessage);
     } finally {
       setSubmitLoading(false);
-      setSheetExpanded(true);
     }
   }
 
@@ -570,55 +825,9 @@ export default function HomeScreen() {
       ? ([routeResult.destination.lng, routeResult.destination.lat] as LngLat)
       : null;
 
-  const routeLine = useMemo(() => {
-    if (!routeResult) {
-      return [];
-    }
-
-    const toSpot = routeCoordinatesToLngLat(routeResult.routeToSpotCoordinates);
-
-    if (toSpot.length > 1) {
-      return toSpot;
-    }
-
-    const primary = routeCoordinatesToLngLat(routeResult.routeCoordinates);
-
-    if (primary.length > 1) {
-      return primary;
-    }
-
-    return routeCoordinatesToLngLat(routeResult.routeToDestinationCoordinates);
-  }, [routeResult]);
-
-  const routeGeoJson = useMemo(() => {
-    if (routeLine.length <= 1) {
-      return {
-        type: "FeatureCollection" as const,
-        features: []
-      };
-    }
-
-    return {
-      type: "FeatureCollection" as const,
-      features: [
-        {
-          type: "Feature" as const,
-          properties: {},
-          geometry: {
-            type: "LineString" as const,
-            coordinates: routeLine
-          }
-        }
-      ]
-    };
-  }, [routeLine]);
-
   const routeLabel = routeResult?.routeSummary
     ? `${routeResult.routeSummary.distanceLabel} · ${routeResult.routeSummary.durationLabel}`
     : null;
-
-  const showExpandedSheet = sheetExpanded && !navigationActive;
-  const showCompactSheet = !showExpandedSheet && !navigationActive;
 
   return (
     <View style={styles.screen}>
@@ -678,7 +887,11 @@ export default function HomeScreen() {
           }
 
           return (
-            <Marker key={getFeatureKey(feature, index)} id={getFeatureKey(feature, index)} lngLat={coordinate}>
+            <Marker
+              key={getFeatureKey(feature, index)}
+              id={getFeatureKey(feature, index)}
+              lngLat={coordinate}
+            >
               <View style={styles.smallParkingMarker}>
                 <Text style={styles.smallMarkerText}>P</Text>
               </View>
@@ -712,210 +925,155 @@ export default function HomeScreen() {
           pointerEvents="box-none"
           style={styles.overlay}
         >
-          {navigationActive ? (
-            <View style={styles.navigationHud}>
-              <Pressable
-                style={styles.hudHandleArea}
-                onPress={() => setSheetExpanded((current) => !current)}
-              >
-                <View style={styles.handle} />
-              </Pressable>
-
-              <View style={styles.navigationHudRow}>
-                <View style={styles.navigationHudText}>
-                  <Text style={styles.hudTitle}>Nawigacja</Text>
-                  <Text style={styles.hudMessage} numberOfLines={2}>
-                    {message}
-                  </Text>
-                  {routeLabel ? (
-                    <Text style={styles.hudMeta}>{routeLabel}</Text>
-                  ) : null}
-                </View>
-
-                <Pressable style={styles.hudStopButton} onPress={handleStopNavigation}>
-                  <Text style={styles.hudStopButtonText}>Stop</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
-
-          {showCompactSheet ? (
-            <View style={styles.compactSheet}>
-              <Pressable
-                style={styles.hudHandleArea}
-                onPress={() => setSheetExpanded(true)}
-              >
-                <View style={styles.handle} />
-              </Pressable>
-
-              <Pressable
-                style={styles.compactSearch}
-                onPress={() => setSheetExpanded(true)}
-              >
-                <Text style={styles.compactSearchIcon}>⌕</Text>
-                <Text style={styles.compactSearchText} numberOfLines={1}>
-                  {destinationQuery || "Dokąd jedziesz?"}
-                </Text>
-              </Pressable>
-
-              <View style={styles.compactActions}>
-                <Pressable style={styles.compactActionButton} onPress={handleUseLocation}>
-                  <Text style={styles.compactActionText}>Lokalizacja</Text>
-                </Pressable>
-
-                <Pressable
-                  style={[styles.compactActionButton, styles.compactAddButton]}
-                  onPress={handleAddDraftEnvelope}
-                >
-                  <Text style={styles.compactAddText}>Dodaj</Text>
-                </Pressable>
-
-                <Pressable
-                  style={[
-                    styles.compactActionButton,
-                    styles.compactNavButton,
-                    !routeResult ? styles.disabledButton : null
-                  ]}
-                  onPress={handleStartNavigation}
-                  disabled={!routeResult || loading}
-                >
-                  <Text style={styles.compactNavText}>Nawiguj</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
-
-          {showExpandedSheet ? (
-            <View style={styles.expandedSheet}>
-              <Pressable
-                style={styles.hudHandleArea}
-                onPress={() => {
-                  Keyboard.dismiss();
-                  setSheetExpanded(false);
-                }}
-              >
-                <View style={styles.handle} />
-              </Pressable>
-
-              <Text style={styles.label}>Cel podróży</Text>
-
-              <View style={styles.inputRow}>
+          {!navigationActive ? (
+            <View style={styles.topSearch}>
+              <View style={styles.searchPill}>
+                <Text style={styles.searchIcon}>⌕</Text>
                 <TextInput
                   value={destinationQuery}
                   onChangeText={setDestinationQuery}
-                  placeholder="Dokąd jedziesz?"
+                  placeholder="Wyszukaj tutaj"
                   placeholderTextColor="#94a3b8"
                   returnKeyType="search"
-                  onFocus={() => setSheetExpanded(true)}
+                  onFocus={() => setSearchFocused(true)}
+                  onBlur={() => setSearchFocused(false)}
                   onSubmitEditing={handleFindRoute}
-                  style={styles.input}
+                  style={styles.searchInput}
                 />
-
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.showButton,
-                    pressed ? styles.buttonPressed : null
-                  ]}
-                  onPress={handleFindRoute}
-                  disabled={loading}
-                >
-                  <Text style={styles.showButtonText}>Pokaż</Text>
-                </Pressable>
+                <Text style={styles.micIcon}>🎙</Text>
               </View>
 
-              <Text style={styles.message} numberOfLines={2}>
-                {loading ? "Pracuję..." : message}
-              </Text>
-
-              {voiceError ? (
-                <Text style={styles.errorText} numberOfLines={2}>
-                  {voiceError}
-                </Text>
-              ) : null}
-
-              {routeLabel ? (
-                <Text style={styles.routeMeta}>Trasa: {routeLabel}</Text>
-              ) : null}
-
-              {draftSpot ? (
-                <Text style={styles.routeMeta}>
-                  Szkic: {draftSpot.status === "submitted_to_osm" ? "wysłany do OSM" : "lokalny"}
-                </Text>
-              ) : null}
-
-              {!keyboardVisible ? (
-                <>
-                  <View style={styles.mainActions}>
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.actionButton,
-                        pressed ? styles.buttonPressed : null
-                      ]}
-                      onPress={handleUseLocation}
-                      disabled={loading}
-                    >
-                      <Text style={styles.actionText}>Lokalizacja</Text>
-                    </Pressable>
-
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.actionButton,
-                        styles.addButton,
-                        pressed ? styles.buttonPressed : null
-                      ]}
-                      onPress={handleAddDraftEnvelope}
-                      disabled={loading}
-                    >
-                      <Text style={styles.addButtonText}>Dodaj</Text>
-                    </Pressable>
-
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.actionButton,
-                        styles.navButton,
-                        !routeResult ? styles.disabledButton : null,
-                        pressed ? styles.buttonPressed : null
-                      ]}
-                      onPress={handleStartNavigation}
-                      disabled={!routeResult || loading}
-                    >
-                      <Text style={styles.navButtonText}>Nawiguj</Text>
-                    </Pressable>
-                  </View>
-
-                  <View style={styles.osmActions}>
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.osmButton,
-                        pressed ? styles.buttonPressed : null
-                      ]}
-                      onPress={handleOsmLoginOrLogout}
-                      disabled={loading}
-                    >
-                      <Text style={styles.osmButtonText}>
-                        {osmUser ? `OSM: ${osmUser.displayName || osmUser.id}` : "Zaloguj OSM"}
-                      </Text>
-                    </Pressable>
-
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.submitButton,
-                        (!draftSpot || submitLoading) ? styles.disabledButton : null,
-                        pressed ? styles.buttonPressed : null
-                      ]}
-                      onPress={handleSubmitDraftEnvelope}
-                      disabled={!draftSpot || submitLoading}
-                    >
-                      {submitLoading ? (
-                        <ActivityIndicator />
-                      ) : (
-                        <Text style={styles.submitButtonText}>Wyślij do OSM</Text>
-                      )}
-                    </Pressable>
-                  </View>
-                </>
+              {searchFocused ? (
+                <View style={styles.searchHelp}>
+                  <Text style={styles.searchHelpTitle}>Cel podróży</Text>
+                  <Text style={styles.searchHelpText}>
+                    Wpisz adres lub nazwę miejsca. Po zatwierdzeniu znajdę kopertę przy celu.
+                  </Text>
+                </View>
               ) : null}
             </View>
+          ) : null}
+
+          {!searchFocused ? (
+            <View style={styles.sideButtons}>
+              <Pressable style={styles.sideButton} onPress={handleUseLocation}>
+                <Text style={styles.sideButtonText}>⌖</Text>
+              </Pressable>
+
+              {navigationActive ? (
+                <Pressable style={styles.sideButton} onPress={toggleCameraMode}>
+                  <Text style={styles.sideModeText}>
+                    {cameraMode === "heading" ? "↟" : "N"}
+                  </Text>
+                </Pressable>
+              ) : (
+                <Pressable style={styles.sideButton} onPress={handleAddDraftEnvelope}>
+                  <Text style={styles.sideButtonText}>＋</Text>
+                </Pressable>
+              )}
+            </View>
+          ) : null}
+
+          {!searchFocused ? (
+            navigationActive ? (
+              <View style={styles.navigationBar}>
+                <View style={styles.navigationInfo}>
+                  <Text style={styles.navigationTitle}>
+                    {cameraMode === "heading" ? "Nawigacja · przodem" : "Nawigacja · północ"}
+                  </Text>
+                  <Text style={styles.navigationMessage} numberOfLines={1}>
+                    {message}
+                  </Text>
+                  {routeLabel ? (
+                    <Text style={styles.navigationMeta}>{routeLabel}</Text>
+                  ) : null}
+                </View>
+
+                <Pressable style={styles.stopButton} onPress={handleStopNavigation}>
+                  <Text style={styles.stopButtonText}>Stop</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={styles.bottomSheet}>
+                <View style={styles.statusRow}>
+                  <View style={styles.statusTextBox}>
+                    <Text style={styles.statusTitle}>
+                      {routeResult ? "Trasa gotowa" : "Gdzie ta koperta?"}
+                    </Text>
+                    <Text style={styles.statusMessage} numberOfLines={2}>
+                      {loading ? "Pracuję..." : message}
+                    </Text>
+                    {routeLabel ? (
+                      <Text style={styles.statusMeta}>Trasa: {routeLabel}</Text>
+                    ) : null}
+                    {voiceError ? (
+                      <Text style={styles.errorText} numberOfLines={1}>
+                        {voiceError}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {loading ? <ActivityIndicator /> : null}
+                </View>
+
+                <View style={styles.mainActions}>
+                  <Pressable
+                    style={styles.actionButton}
+                    onPress={handleUseLocation}
+                    disabled={loading}
+                  >
+                    <Text style={styles.actionButtonText}>Lokalizacja</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[styles.actionButton, styles.addButton]}
+                    onPress={handleAddDraftEnvelope}
+                    disabled={loading}
+                  >
+                    <Text style={styles.addButtonText}>Dodaj</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[
+                      styles.actionButton,
+                      styles.navButton,
+                      !routeResult ? styles.disabledButton : null
+                    ]}
+                    onPress={handleStartNavigation}
+                    disabled={!routeResult || loading}
+                  >
+                    <Text style={styles.navButtonText}>Nawiguj</Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.secondaryActions}>
+                  <Pressable
+                    style={styles.osmButton}
+                    onPress={handleOsmLoginOrLogout}
+                    disabled={loading}
+                  >
+                    <Text style={styles.osmButtonText}>
+                      {osmUser ? "OSM połączone" : "Zaloguj OSM"}
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[
+                      styles.submitButton,
+                      (!draftSpot || submitLoading) ? styles.disabledButton : null
+                    ]}
+                    onPress={handleSubmitDraftEnvelope}
+                    disabled={!draftSpot || submitLoading}
+                  >
+                    {submitLoading ? (
+                      <ActivityIndicator />
+                    ) : (
+                      <Text style={styles.submitButtonText}>Wyślij do OSM</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            )
           ) : null}
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -936,156 +1094,133 @@ const styles = StyleSheet.create({
   },
   overlay: {
     flex: 1,
-    justifyContent: "flex-end",
-    paddingHorizontal: 12,
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
     paddingBottom: 12
   },
-  handle: {
-    width: 42,
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: "rgba(15,23,42,0.28)",
-    alignSelf: "center"
+  topSearch: {
+    paddingTop: 8
   },
-  hudHandleArea: {
-    paddingTop: 8,
-    paddingBottom: 10
-  },
-  compactSheet: {
-    backgroundColor: "rgba(255,255,255,0.94)",
-    borderRadius: 28,
-    paddingHorizontal: 14,
-    paddingBottom: 12,
+  searchPill: {
+    minHeight: 58,
+    borderRadius: 29,
+    backgroundColor: "rgba(255,255,255,0.96)",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    gap: 10,
     shadowColor: "#000000",
-    shadowOpacity: 0.14,
-    shadowRadius: 20,
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
     elevation: 8
   },
-  compactSearch: {
-    minHeight: 48,
+  searchIcon: {
+    color: "#111827",
+    fontSize: 25,
+    fontWeight: "900"
+  },
+  searchInput: {
+    flex: 1,
+    color: "#0f172a",
+    fontSize: 19,
+    fontWeight: "800",
+    paddingVertical: 0
+  },
+  micIcon: {
+    fontSize: 22
+  },
+  searchHelp: {
+    marginTop: 12,
+    backgroundColor: "rgba(17,17,17,0.92)",
     borderRadius: 20,
-    backgroundColor: "rgba(15,23,42,0.08)",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
+    padding: 16,
+    gap: 6
+  },
+  searchHelpTitle: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  searchHelpText: {
+    color: "#cbd5e1",
+    fontSize: 14,
+    lineHeight: 20
+  },
+  sideButtons: {
+    position: "absolute",
+    right: 14,
+    top: 96,
     gap: 10
   },
-  compactSearchIcon: {
-    fontSize: 26,
-    color: "#0f172a",
-    fontWeight: "700"
-  },
-  compactSearchText: {
-    flex: 1,
-    color: "#334155",
-    fontSize: 18,
-    fontWeight: "800"
-  },
-  compactActions: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 10
-  },
-  compactActionButton: {
-    flex: 1,
-    minHeight: 42,
-    borderRadius: 18,
-    backgroundColor: "#f1f5f9",
+  sideButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(255,255,255,0.96)",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 8
-  },
-  compactActionText: {
-    color: "#1e293b",
-    fontSize: 13,
-    fontWeight: "900"
-  },
-  compactAddButton: {
-    backgroundColor: "#16a34a"
-  },
-  compactAddText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "900"
-  },
-  compactNavButton: {
-    backgroundColor: "#2563eb"
-  },
-  compactNavText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "900"
-  },
-  expandedSheet: {
-    backgroundColor: "rgba(255,255,255,0.96)",
-    borderRadius: 30,
-    paddingHorizontal: 16,
-    paddingBottom: 14,
     shadowColor: "#000000",
-    shadowOpacity: 0.16,
-    shadowRadius: 22,
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 7
+  },
+  sideButtonText: {
+    color: "#0f172a",
+    fontSize: 25,
+    fontWeight: "900"
+  },
+  sideModeText: {
+    color: "#0f172a",
+    fontSize: 20,
+    fontWeight: "900"
+  },
+  bottomSheet: {
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderRadius: 28,
+    padding: 14,
+    gap: 10,
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
     elevation: 9
   },
-  label: {
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  statusTextBox: {
+    flex: 1
+  },
+  statusTitle: {
     color: "#1d4ed8",
     fontSize: 13,
     fontWeight: "900",
-    letterSpacing: 1,
     textTransform: "uppercase",
-    marginBottom: 8
+    letterSpacing: 1
   },
-  inputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10
-  },
-  input: {
-    flex: 1,
-    minHeight: 52,
-    borderRadius: 20,
-    backgroundColor: "#f8fafc",
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    paddingHorizontal: 14,
-    fontSize: 18,
+  statusMessage: {
     color: "#0f172a",
-    fontWeight: "800"
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "700",
+    marginTop: 4
   },
-  showButton: {
-    minHeight: 52,
-    borderRadius: 20,
-    backgroundColor: "#2563eb",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 20
-  },
-  showButtonText: {
-    color: "#ffffff",
-    fontSize: 17,
-    fontWeight: "900"
-  },
-  message: {
+  statusMeta: {
     color: "#334155",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 10
-  },
-  routeMeta: {
-    color: "#0f172a",
     fontSize: 13,
     fontWeight: "900",
-    marginTop: 6
+    marginTop: 4
   },
   errorText: {
     color: "#b91c1c",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "800",
     marginTop: 4
   },
   mainActions: {
     flexDirection: "row",
-    gap: 8,
-    marginTop: 12
+    gap: 8
   },
   actionButton: {
     flex: 1,
@@ -1096,7 +1231,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 8
   },
-  actionText: {
+  actionButtonText: {
     color: "#1e293b",
     fontSize: 13,
     fontWeight: "900"
@@ -1117,19 +1252,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "900"
   },
-  osmActions: {
+  secondaryActions: {
     flexDirection: "row",
-    gap: 8,
-    marginTop: 8
+    gap: 8
   },
   osmButton: {
     flex: 1,
-    minHeight: 42,
-    borderRadius: 18,
+    minHeight: 40,
+    borderRadius: 17,
     backgroundColor: "#f8fafc",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 10
+    paddingHorizontal: 8
   },
   osmButtonText: {
     color: "#166534",
@@ -1138,64 +1272,61 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     flex: 1,
-    minHeight: 42,
-    borderRadius: 18,
+    minHeight: 40,
+    borderRadius: 17,
     backgroundColor: "#2563eb",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 10
+    paddingHorizontal: 8
   },
   submitButtonText: {
     color: "#ffffff",
     fontSize: 13,
     fontWeight: "900"
   },
-  navigationHud: {
-    backgroundColor: "rgba(255,255,255,0.94)",
-    borderRadius: 28,
-    paddingHorizontal: 14,
-    paddingBottom: 12,
-    shadowColor: "#000000",
-    shadowOpacity: 0.16,
-    shadowRadius: 22,
-    elevation: 9
-  },
-  navigationHudRow: {
+  navigationBar: {
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderRadius: 26,
+    padding: 13,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12
+    gap: 12,
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    elevation: 9
   },
-  navigationHudText: {
+  navigationInfo: {
     flex: 1
   },
-  hudTitle: {
+  navigationTitle: {
     color: "#1d4ed8",
     fontSize: 13,
     fontWeight: "900",
     textTransform: "uppercase",
     letterSpacing: 1
   },
-  hudMessage: {
+  navigationMessage: {
     color: "#0f172a",
     fontSize: 15,
     fontWeight: "800",
-    marginTop: 3
+    marginTop: 2
   },
-  hudMeta: {
+  navigationMeta: {
     color: "#334155",
     fontSize: 13,
     fontWeight: "800",
     marginTop: 3
   },
-  hudStopButton: {
-    minHeight: 46,
+  stopButton: {
+    minHeight: 44,
     borderRadius: 18,
     backgroundColor: "#fee2e2",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 20
   },
-  hudStopButtonText: {
+  stopButtonText: {
     color: "#991b1b",
     fontSize: 15,
     fontWeight: "900"
@@ -1268,8 +1399,5 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.45
-  },
-  buttonPressed: {
-    opacity: 0.72
   }
 });
