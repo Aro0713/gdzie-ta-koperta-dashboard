@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,17 @@ ACCESS_KEYS = [
 POLAND_PROJECTED_CRS = "EPSG:2180"
 PARKING_SPACE_MATCH_DISTANCE_METERS = 30
 PRIVATE_ACCESS_INHERIT_DISTANCE_METERS = 25
+
+OVERPASS_URLS = [
+    "https://overpass-api.de/api",
+    "https://overpass.kumi.systems/api",
+    "https://overpass.openstreetmap.fr/api",
+]
+
+FETCH_RETRY_ATTEMPTS = 3
+FETCH_RETRY_BASE_SLEEP_SECONDS = 20
+
+FETCH_ERRORS: list[dict[str, Any]] = []
 
 
 def now_iso() -> str:
@@ -367,28 +379,66 @@ def fetch_osmnx_features_for_place(
 
     print(f"Fetching {label}: place={place_query}, tags={tags}")
 
-    try:
-        gdf = ox.features.features_from_place(
-            query=place_query,
-            tags=tags,
-        )
-    except Exception as exc:
-        message = str(exc)
+    last_error: str | None = None
 
-        if "No data elements" in message or "InsufficientResponseError" in message:
-            print(f"No OSM data for {label}")
-            return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    for overpass_url in OVERPASS_URLS:
+        ox.settings.overpass_url = overpass_url
 
-        raise RuntimeError(f"Failed to fetch {label}: {message}") from exc
+        for attempt in range(1, FETCH_RETRY_ATTEMPTS + 1):
+            try:
+                print(
+                    f"Overpass attempt {attempt}/{FETCH_RETRY_ATTEMPTS} "
+                    f"for {label} via {overpass_url}"
+                )
 
-    if gdf.empty:
-        return gdf
+                gdf = ox.features.features_from_place(
+                    query=place_query,
+                    tags=tags,
+                )
 
-    if gdf.crs is None:
-        gdf = gdf.set_crs("EPSG:4326")
+                if gdf.empty:
+                    return gdf
 
-    return gdf.to_crs("EPSG:4326")
+                if gdf.crs is None:
+                    gdf = gdf.set_crs("EPSG:4326")
 
+                return gdf.to_crs("EPSG:4326")
+
+            except Exception as exc:
+                message = str(exc)
+                last_error = message
+
+                if "No data elements" in message or "InsufficientResponseError" in message:
+                    print(f"No OSM data for {label}")
+                    return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+                print(
+                    f"Fetch failed for {label} via {overpass_url}, "
+                    f"attempt {attempt}/{FETCH_RETRY_ATTEMPTS}: {message}"
+                )
+
+                if attempt < FETCH_RETRY_ATTEMPTS:
+                    sleep_seconds = FETCH_RETRY_BASE_SLEEP_SECONDS * attempt
+                    print(f"Retrying {label} in {sleep_seconds} seconds...")
+                    time.sleep(sleep_seconds)
+
+    error_record = {
+        "areaId": area.get("id"),
+        "areaName": area.get("name"),
+        "placeQuery": place_query,
+        "label": label,
+        "tags": tags,
+        "error": last_error,
+    }
+
+    FETCH_ERRORS.append(error_record)
+
+    print(
+        f"WARNING: Failed to fetch {label} from all Overpass endpoints. "
+        "Continuing with empty data for this layer."
+    )
+
+    return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
 def normalize_area_features(
     gdf: gpd.GeoDataFrame,
@@ -474,6 +524,7 @@ def build_dataset() -> gpd.GeoDataFrame:
     ox.settings.use_cache = False
     ox.settings.log_console = True
     ox.settings.timeout = 240
+    ox.settings.requests_timeout = 300
 
     synced_at = now_iso()
     areas = load_areas()
@@ -626,6 +677,8 @@ def write_outputs(gdf: gpd.GeoDataFrame) -> None:
             "parkingSpaceMatchDistanceMeters": PARKING_SPACE_MATCH_DISTANCE_METERS,
             "privateAccessInheritDistanceMeters": PRIVATE_ACCESS_INHERIT_DISTANCE_METERS,
         },
+        "fetchErrors": FETCH_ERRORS,
+        "fetchErrorsCount": len(FETCH_ERRORS),
         "note": (
             "OSM-first Poland snapshot generated from OpenStreetMap data via "
             "OSMnx/Overpass. User location is used only to filter 5 km in the "
