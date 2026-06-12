@@ -51,6 +51,7 @@ ACCESS_KEYS = [
     "motor_vehicle",
     "motorcar",
     "foot",
+    "parking",
 ]
 
 POLAND_PROJECTED_CRS = "EPSG:2180"
@@ -422,16 +423,16 @@ def fetch_osmnx_features_for_place(
                     print(f"Retrying {label} in {sleep_seconds} seconds...")
                     time.sleep(sleep_seconds)
 
-    error_record = {
-        "areaId": area.get("id"),
-        "areaName": area.get("name"),
-        "placeQuery": place_query,
-        "label": label,
-        "tags": tags,
-        "error": last_error,
-    }
-
-    FETCH_ERRORS.append(error_record)
+    FETCH_ERRORS.append(
+        {
+            "areaId": area.get("id"),
+            "areaName": area.get("name"),
+            "placeQuery": place_query,
+            "label": label,
+            "tags": tags,
+            "error": last_error,
+        }
+    )
 
     print(
         f"WARNING: Failed to fetch {label} from all Overpass endpoints. "
@@ -462,7 +463,9 @@ def normalize_area_features(
         capacity_disabled = as_text(safe_get(row, "capacity:disabled"))
 
         if object_type_hint == "parking_with_disabled_capacity":
-            if amenity != "parking":
+            parking = as_text(safe_get(row, "parking"))
+
+            if amenity != "parking" and parking is None:
                 continue
 
             if not has_useful_disabled_capacity(capacity_disabled):
@@ -534,6 +537,12 @@ def build_dataset() -> gpd.GeoDataFrame:
         print("=" * 80)
         print(f"Area {index}/{len(areas)}: {area['name']}")
 
+        all_parking_gdf = fetch_osmnx_features_for_place(
+            area=area,
+            tags={"amenity": "parking"},
+            label=f"{area['id']} amenity=parking",
+        )
+
         capacity_gdf = fetch_osmnx_features_for_place(
             area=area,
             tags={"capacity:disabled": True},
@@ -553,7 +562,7 @@ def build_dataset() -> gpd.GeoDataFrame:
 
         public_disabled_spaces_gdf = filter_disabled_spaces_inside_non_public_parkings(
             public_disabled_spaces_gdf,
-            raw_parking_gdf=capacity_gdf,
+            raw_parking_gdf=all_parking_gdf,
             label=f"{area['id']} parking_space=disabled",
         )
 
@@ -561,7 +570,6 @@ def build_dataset() -> gpd.GeoDataFrame:
             capacity_gdf,
             label=f"{area['id']} capacity:disabled",
         )
-
 
         all_records.extend(
             normalize_area_features(
