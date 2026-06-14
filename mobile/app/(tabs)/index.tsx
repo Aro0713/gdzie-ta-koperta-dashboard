@@ -39,6 +39,7 @@ import {
   type OsmMobileUser
 } from "@/lib/osmMobileAuth";
 import { useNavigationVoice } from "@/lib/useNavigationVoice";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Position = {
   lat: number;
@@ -286,8 +287,12 @@ export default function HomeScreen() {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
   const [cameraMode, setCameraMode] = useState<NavigationCameraMode>("heading");
+  const [sheetCollapsed, setSheetCollapsed] = useState(false);
 
   const { playVoiceCommand, voiceError } = useNavigationVoice();
+  const insets = useSafeAreaInsets();
+  const topOffset = Math.max(insets.top, Platform.OS === "android" ? 34 : 8) + 8;
+  const bottomOffset = Math.max(insets.bottom, Platform.OS === "android" ? 48 : 12) + 8;
 
   const routeLine = useMemo(() => getPreferredRoute(routeResult), [routeResult]);
 
@@ -923,10 +928,10 @@ export default function HomeScreen() {
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           pointerEvents="box-none"
-          style={styles.overlay}
+          style={[styles.overlay, { paddingBottom: bottomOffset }]}
         >
           {!navigationActive ? (
-            <View style={styles.topSearch}>
+            <View style={[styles.topSearch, { paddingTop: topOffset }]}>
               <View style={styles.searchPill}>
                 <Text style={styles.searchIcon}>⌕</Text>
                 <TextInput
@@ -994,7 +999,17 @@ export default function HomeScreen() {
                 </Pressable>
               </View>
             ) : (
-              <View style={styles.bottomSheet}>
+              <View style={[styles.bottomSheet, sheetCollapsed ? styles.bottomSheetCollapsed : null]}>
+                  <Pressable
+                    style={styles.sheetHandleButton}
+                    onPress={() => setSheetCollapsed((current) => !current)}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      sheetCollapsed ? "Rozwiń panel nawigacji" : "Zwiń panel nawigacji"
+                    }
+                  >
+                    <View style={styles.sheetHandle} />
+                  </Pressable>
                 <View style={styles.statusRow}>
                   <View style={styles.statusTextBox}>
                     <Text style={styles.statusTitle}>
@@ -1399,5 +1414,21 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.45
+  },
+  bottomSheetCollapsed: {
+    maxHeight: 76,
+    overflow: "hidden"
+  },
+  sheetHandleButton: {
+    alignSelf: "center",
+    paddingTop: 0,
+    paddingBottom: 9,
+    paddingHorizontal: 28
+  },
+  sheetHandle: {
+    width: 46,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(15,23,42,0.28)"
   }
 });
