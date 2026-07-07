@@ -1,4 +1,5 @@
 import * as Location from "expo-location";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -39,6 +40,10 @@ import {
   type OsmMobileUser
 } from "@/lib/osmMobileAuth";
 import { useNavigationVoice } from "@/lib/useNavigationVoice";
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent
+} from "expo-speech-recognition";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Position = {
@@ -63,6 +68,8 @@ type NavigationCameraMode = "heading" | "north";
 const DEFAULT_CENTER: LngLat = [21.017532, 52.237049];
 const REROUTE_DISTANCE_METERS = 75;
 const REROUTE_MIN_INTERVAL_MS = 6000;
+const SNAP_TO_ROUTE_MAX_METERS = 120;
+const KEEP_AWAKE_TAG = "gtk-navigation";
 
 const OSM_RASTER_STYLE = {
   version: 8 as 8,
@@ -261,6 +268,75 @@ function distanceToRouteMeters(point: LngLat, route: LngLat[]) {
   return minDistance;
 }
 
+function getClosestProjectedPointOnSegment(point: LngLat, start: LngLat, end: LngLat) {
+  const p = projectMeters(point, point);
+  const a = projectMeters(start, point);
+  const b = projectMeters(end, point);
+
+  const abX = b.x - a.x;
+  const abY = b.y - a.y;
+  const apX = p.x - a.x;
+  const apY = p.y - a.y;
+  const abLengthSquared = abX * abX + abY * abY;
+
+  if (abLengthSquared === 0) {
+    return {
+      point: start,
+      distanceMeters: haversineMeters(point, start)
+    };
+  }
+
+  const t = Math.max(0, Math.min(1, (apX * abX + apY * abY) / abLengthSquared));
+  const closestX = a.x + abX * t;
+  const closestY = a.y + abY * t;
+  const earthRadiusMeters = 6371000;
+
+  const lng =
+    point[0] +
+    (closestX / (Math.cos(toRadians(point[1])) * earthRadiusMeters)) *
+      (180 / Math.PI);
+  const lat = point[1] + (closestY / earthRadiusMeters) * (180 / Math.PI);
+
+  const snapped: LngLat = [lng, lat];
+
+  return {
+    point: snapped,
+    distanceMeters: haversineMeters(point, snapped)
+  };
+}
+
+function snapPointToRoute(point: LngLat, route: LngLat[]) {
+  if (route.length < 2) {
+    return {
+      point,
+      distanceMeters: Number.POSITIVE_INFINITY,
+      snapped: false
+    };
+  }
+
+  let bestPoint = point;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 1; index < route.length; index += 1) {
+    const candidate = getClosestProjectedPointOnSegment(
+      point,
+      route[index - 1],
+      route[index]
+    );
+
+    if (candidate.distanceMeters < bestDistance) {
+      bestDistance = candidate.distanceMeters;
+      bestPoint = candidate.point;
+    }
+  }
+
+  return {
+    point: bestDistance <= SNAP_TO_ROUTE_MAX_METERS ? bestPoint : point,
+    distanceMeters: bestDistance,
+    snapped: bestDistance <= SNAP_TO_ROUTE_MAX_METERS
+  };
+}
+
 export default function HomeScreen() {
   const cameraRef = useRef<CameraRef | null>(null);
   const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
@@ -287,9 +363,46 @@ export default function HomeScreen() {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
   const [cameraMode, setCameraMode] = useState<NavigationCameraMode>("heading");
+  const [speechListening, setSpeechListening] = useState(false);
   const [sheetCollapsed, setSheetCollapsed] = useState(false);
 
   const { playVoiceCommand, voiceError } = useNavigationVoice();
+
+  useSpeechRecognitionEvent("start", () => {
+    setSpeechListening(true);
+    setMessage("Słucham celu podróży...");
+  });
+
+  useSpeechRecognitionEvent("end", () => {
+    setSpeechListening(false);
+  });
+
+  useSpeechRecognitionEvent("error", (event) => {
+    const details = event as unknown as {
+      message?: string;
+      error?: string;
+    };
+
+    setSpeechListening(false);
+    setMessage(details.message || details.error || "Nie udało się rozpoznać mowy.");
+  });
+
+  useSpeechRecognitionEvent("result", (event) => {
+    const details = event as unknown as {
+      results?: {
+        transcript?: string;
+      }[];
+    };
+    const transcript = details.results?.[0]?.transcript?.trim();
+
+    if (!transcript) {
+      return;
+    }
+
+    setDestinationQuery(transcript);
+    destinationQueryRef.current = transcript;
+    setMessage("Cel rozpoznany. Naciśnij szukaj albo enter.");
+  });
   const insets = useSafeAreaInsets();
   const topOffset = Math.max(insets.top, Platform.OS === "android" ? 34 : 8) + 8;
   const bottomOffset = Math.max(insets.bottom, Platform.OS === "android" ? 48 : 12) + 8;
@@ -342,6 +455,20 @@ export default function HomeScreen() {
   useEffect(() => {
     cameraModeRef.current = cameraMode;
   }, [cameraMode]);
+  useEffect(() => {
+    if (navigationActive) {
+      void activateKeepAwakeAsync(KEEP_AWAKE_TAG);
+
+      return () => {
+        deactivateKeepAwake(KEEP_AWAKE_TAG);
+      };
+    }
+
+    deactivateKeepAwake(KEEP_AWAKE_TAG);
+
+    return undefined;
+  }, [navigationActive]);
+
 
   useEffect(() => {
     let mounted = true;
@@ -421,9 +548,13 @@ export default function HomeScreen() {
     });
   }
 
+  function getNavigationCameraPoint(position: Position) {
+    return snapPointToRoute(positionToLngLat(position), routeLineRef.current).point;
+  }
+
   function focusNavigation(position: Position, duration = 260) {
     setCamera({
-      center: positionToLngLat(position),
+      center: getNavigationCameraPoint(position),
       zoom: 17,
       heading: position.heading,
       duration
@@ -588,6 +719,35 @@ export default function HomeScreen() {
     }
   }
 
+  async function handleVoiceDestinationInput() {
+    try {
+      Keyboard.dismiss();
+      setSearchFocused(true);
+
+      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+
+      if (!permission.granted) {
+        setMessage("Brak zgody na mikrofon lub rozpoznawanie mowy.");
+        return;
+      }
+
+      await ExpoSpeechRecognitionModule.start({
+        lang: "pl-PL",
+        interimResults: false,
+        maxAlternatives: 1,
+        continuous: false,
+        requiresOnDeviceRecognition: false,
+        addsPunctuation: false
+      });
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Nie udało się uruchomić mikrofonu.";
+
+      setSpeechListening(false);
+      setMessage(errorMessage);
+    }
+  }
+
   async function handleUseLocation() {
     try {
       setLoading(true);
@@ -679,6 +839,12 @@ export default function HomeScreen() {
           };
 
           setCurrentPosition(updated);
+          
+          if (updated.accuracy !== null && updated.accuracy > 120) {
+            setMessage("GPS niedokładny. Czekam na lepszą pozycję.");
+            return;
+          }
+
           focusNavigation(updated);
           void maybeRerouteFromPosition(updated);
         }
@@ -822,7 +988,11 @@ export default function HomeScreen() {
     }
   }
 
-  const userLngLat = currentPosition ? positionToLngLat(currentPosition) : null;
+  const rawUserLngLat = currentPosition ? positionToLngLat(currentPosition) : null;
+  const displayUserLngLat =
+    rawUserLngLat && navigationActive
+      ? snapPointToRoute(rawUserLngLat, routeLine).point
+      : rawUserLngLat;
   const recommendedLngLat = featureToLngLat(routeResult?.recommendedSpot);
   const draftLngLat = draftSpot ? ([draftSpot.lng, draftSpot.lat] as LngLat) : null;
   const destinationLngLat =
@@ -852,8 +1022,8 @@ export default function HomeScreen() {
 
         <UserLocation animated accuracy heading />
 
-        {userLngLat ? (
-          <Marker id="user" lngLat={userLngLat}>
+        {displayUserLngLat ? (
+          <Marker id="user" lngLat={displayUserLngLat}>
             <View style={styles.userMarker}>
               <View style={styles.userMarkerInner} />
             </View>
@@ -945,14 +1115,21 @@ export default function HomeScreen() {
                   onSubmitEditing={handleFindRoute}
                   style={styles.searchInput}
                 />
-                <Text style={styles.micIcon}>🎙</Text>
+                <Pressable
+                  style={styles.micButton}
+                  onPress={handleVoiceDestinationInput}
+                  accessibilityRole="button"
+                  accessibilityLabel="Wpisz cel głosem"
+                >
+                  <Text style={styles.micIcon}>{speechListening ? "…" : "🎙"}</Text>
+                </Pressable>
               </View>
 
               {searchFocused ? (
                 <View style={styles.searchHelp}>
                   <Text style={styles.searchHelpTitle}>Cel podróży</Text>
                   <Text style={styles.searchHelpText}>
-                    Wpisz adres lub nazwę miejsca. Po zatwierdzeniu znajdę kopertę przy celu.
+                    Wpisz adres lub nazwę miejsca. Po zatwierdzeniu znajdę kopertę najbliżej wybranego miejsca.
                   </Text>
                 </View>
               ) : null}
@@ -1141,6 +1318,18 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     paddingVertical: 0
   },
+  micButton: {
+
+    width: 36,
+
+    height: 44,
+
+    alignItems: "center",
+
+    justifyContent: "center"
+
+  },
+
   micIcon: {
     fontSize: 22
   },
