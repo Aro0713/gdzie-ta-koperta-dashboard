@@ -23,7 +23,11 @@ module.exports = ({ config }) => {
         ...(config.ios?.infoPlist || {}),
         NSLocationWhenInUseUsageDescription:
           "Aplikacja używa lokalizacji, aby pokazać Twoją pozycję, znaleźć kopertę przy celu podróży i umożliwić dodanie nowej koperty.",
-        ITSAppUsesNonExemptEncryption: false
+        ITSAppUsesNonExemptEncryption: false,
+        NSMicrophoneUsageDescription:
+          "Aplikacja używa mikrofonu, aby umożliwić głosowe wpisanie celu podróży.",
+        NSSpeechRecognitionUsageDescription:
+          "Aplikacja używa rozpoznawania mowy, aby wpisać cel podróży głosem."
       }
     },
 
@@ -33,14 +37,16 @@ module.exports = ({ config }) => {
       versionCode: 1,
       permissions: [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "RECORD_AUDIO"
       ]
     },
 
     plugins: Array.from(
       new Set([
         ...(config.plugins || []),
-        "@maplibre/maplibre-react-native"
+        "@maplibre/maplibre-react-native",
+        "expo-speech-recognition"
       ])
     ),
 
