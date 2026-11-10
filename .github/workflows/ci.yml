@@ -31,4 +31,7 @@ jobs:
         run: npm run typecheck
 
       - name: Production Build
+        env:
+          # Next.js imports the Neon client while collecting route metadata.
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/gtk
         run: npm run build
