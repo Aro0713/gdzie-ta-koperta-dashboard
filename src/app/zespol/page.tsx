@@ -33,6 +33,14 @@ const team = [
     description:
       "Informatyk wspierający powstanie aplikacji w oparciu o dane OpenStreetMap, podejście OSM-first, automatyzację pobierania danych oraz integrację społecznościowego mapowania.",
     accent: "data"
+  },
+  {
+    initials: "BM",
+    name: "Bartosz Majocha",
+    role: "Twórca aplikacji PWA",
+    description:
+      "Odpowiada za stworzenie i rozwój aplikacji PWA „Gdzie ta Koperta?”, jej architekturę techniczną oraz wdrożenie narzędzi ułatwiających osobom z niepełnosprawnościami szybkie odnajdywanie i zgłaszanie niebieskich kopert. Na co dzień student informatyki na Politechnice Śląskiej.",
+    accent: "build"
   }
 ];
 
@@ -105,8 +113,8 @@ export default function ZespolPage() {
           </p>
         </div>
 
-        <Link href="/" className="primary-button">
-          Nawigacja
+        <Link href="/app" className="primary-button">
+          Otwórz mapę kopert
         </Link>
       </section>
     </main>
