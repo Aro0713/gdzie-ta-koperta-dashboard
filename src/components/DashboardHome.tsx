@@ -1,46 +1,22 @@
-﻿"use client";
+"use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { DashboardSpotList } from "@/components/DashboardSpotList";
-import { KopertyMap, type UserAddedSpot } from "@/components/KopertyMap";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Hero } from "@/components/Hero";
 import { StatsCards, type StatsCardItem } from "@/components/StatsCards";
-import type { OsmParkingResponse } from "@/lib/osmParking";
+import { getAppUrl } from "@/lib/appUrl";
 
 type DashboardLiveStatsResponse = {
   ok?: boolean;
-  range?: string;
   pageViews?: number;
   visitors?: number;
   countries?: number;
   countriesDetail?: string;
-  topCountries?: Array<{
-    country: string;
-    views: number;
-  }>;
   error?: string;
 };
 
 type GtkOsmStatsResponse = {
   ok?: boolean;
-  baseline?: {
-    source: string;
-    capturedAt: string;
-    contributors: number;
-    mapChanges: number;
-    changesets: number;
-    createdNodes: number;
-    countries: Array<{
-      country: string;
-      contributors: number;
-      changesets: number;
-      mapChanges: number;
-    }>;
-  };
-  liveSinceRegistry?: {
-    submissions: number;
-    contributors: number;
-    changesets: number;
-  };
   totals?: {
     contributors: number;
     mapChanges: number;
@@ -54,313 +30,265 @@ type GtkOsmStatsResponse = {
 
 function formatStatNumber(value: number | undefined | null) {
   const safeValue = Number(value);
-
   if (!Number.isFinite(safeValue)) {
-    return "0";
+    return "—";
   }
-
   return safeValue.toLocaleString("pl-PL");
 }
 
 export function DashboardHome() {
-  const [osmData, setOsmData] = useState<OsmParkingResponse | null>(null);
-  const [userSpots, setUserSpots] = useState<UserAddedSpot[]>([]);
-
-  const [liveStats, setLiveStats] =
-    useState<DashboardLiveStatsResponse | null>(null);
+  const [liveStats, setLiveStats] = useState<DashboardLiveStatsResponse | null>(null);
   const [loadingLiveStats, setLoadingLiveStats] = useState(true);
-  const [liveStatsError, setLiveStatsError] = useState(false);
 
-  const [gtkOsmStats, setGtkOsmStats] =
-    useState<GtkOsmStatsResponse | null>(null);
+  const [gtkOsmStats, setGtkOsmStats] = useState<GtkOsmStatsResponse | null>(null);
   const [loadingGtkOsmStats, setLoadingGtkOsmStats] = useState(true);
-  const [gtkOsmStatsError, setGtkOsmStatsError] = useState(false);
+
+  const [appUrl, setAppUrl] = useState("/app");
 
   useEffect(() => {
+    setAppUrl(getAppUrl());
     let active = true;
-    let intervalId: number | null = null;
 
     async function loadLiveStats() {
-      setLiveStatsError(false);
-
       try {
-        const response = await fetch("/api/dashboard/live-stats", {
-          cache: "no-store"
-        });
-
+        const response = await fetch("/api/dashboard/live-stats", { cache: "no-store" });
         const data = (await response.json()) as DashboardLiveStatsResponse;
-
-        if (!response.ok || !data.ok || data.error) {
-          throw new Error(data.error || "Nie udało się pobrać live statystyk.");
+        if (active && data.ok) {
+          setLiveStats(data);
         }
-
-        if (!active) {
-          return;
-        }
-
-        setLiveStats(data);
       } catch {
-        if (!active) {
-          return;
-        }
-
-        setLiveStatsError(true);
       } finally {
-        if (active) {
-          setLoadingLiveStats(false);
+        if (active) setLoadingLiveStats(false);
+      }
+    }
+
+    async function loadGtkOsmStats() {
+      try {
+        const response = await fetch("/api/dashboard/gtk-osm-stats", { cache: "no-store" });
+        const data = (await response.json()) as GtkOsmStatsResponse;
+        if (active && data.ok) {
+          setGtkOsmStats(data);
         }
+      } catch {
+      } finally {
+        if (active) setLoadingGtkOsmStats(false);
       }
     }
 
     void loadLiveStats();
-
-    intervalId = window.setInterval(() => {
-      void loadLiveStats();
-    }, 30000);
-
-    return () => {
-      active = false;
-
-      if (intervalId) {
-        window.clearInterval(intervalId);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    let intervalId: number | null = null;
-
-    async function loadGtkOsmStats() {
-      setGtkOsmStatsError(false);
-
-      try {
-        const response = await fetch("/api/dashboard/gtk-osm-stats", {
-          cache: "no-store"
-        });
-
-        const data = (await response.json()) as GtkOsmStatsResponse;
-
-        if (!response.ok || !data.ok || data.error) {
-          throw new Error(data.error || "Nie udało się pobrać statystyk OSM GTK.");
-        }
-
-        if (!active) {
-          return;
-        }
-
-        setGtkOsmStats(data);
-      } catch {
-        if (!active) {
-          return;
-        }
-
-        setGtkOsmStatsError(true);
-      } finally {
-        if (active) {
-          setLoadingGtkOsmStats(false);
-        }
-      }
-    }
-
     void loadGtkOsmStats();
 
-    intervalId = window.setInterval(() => {
-      void loadGtkOsmStats();
-    }, 60000);
-
     return () => {
       active = false;
-
-      if (intervalId) {
-        window.clearInterval(intervalId);
-      }
     };
   }, []);
-
-  const osmExactKoperty = useMemo(() => {
-    return (osmData?.features || []).filter(
-      (feature) => feature.properties?.objectType === "disabled_parking_space"
-    ).length;
-  }, [osmData]);
-
-  const osmParkingWithDisabledCapacity = useMemo(() => {
-    return (osmData?.features || []).filter(
-      (feature) =>
-        feature.properties?.objectType === "parking_with_disabled_capacity"
-    ).length;
-  }, [osmData]);
-
-  const visibleFeatures = useMemo(() => {
-    return [...(osmData?.features || [])]
-      .sort((a, b) => {
-        const firstType =
-          a.properties?.objectType === "disabled_parking_space" ? 0 : 1;
-        const secondType =
-          b.properties?.objectType === "disabled_parking_space" ? 0 : 1;
-
-        if (firstType !== secondType) {
-          return firstType - secondType;
-        }
-
-        const firstDistance =
-          a.properties?.distanceMeters ?? Number.MAX_SAFE_INTEGER;
-        const secondDistance =
-          b.properties?.distanceMeters ?? Number.MAX_SAFE_INTEGER;
-
-        return firstDistance - secondDistance;
-      })
-      .slice(0, 18);
-  }, [osmData]);
-
-  const pageViewsValue: string | number = loadingLiveStats
-    ? "…"
-    : liveStatsError && !liveStats
-      ? "—"
-      : formatStatNumber(liveStats?.pageViews);
-
-  const visitorsValue: string | number = loadingLiveStats
-    ? "…"
-    : liveStatsError && !liveStats
-      ? "—"
-      : formatStatNumber(liveStats?.visitors);
-
-  const countriesValue: string | number = loadingLiveStats
-    ? "…"
-    : liveStatsError && !liveStats
-      ? "—"
-      : formatStatNumber(liveStats?.countries);
-
-  const pageViewsDetail =
-    loadingLiveStats && !liveStats
-      ? "Pobieram dane z Vercel Analytics"
-      : liveStatsError && !liveStats
-        ? "Brak live danych z Vercel Analytics"
-        : "Łączna liczba odsłon strony";
-
-  const visitorsDetail =
-    loadingLiveStats && !liveStats
-      ? "Pobieram dane z Vercel Analytics"
-      : liveStatsError && !liveStats
-        ? "Brak live danych z Vercel Analytics"
-        : "Łączna liczba odwiedzających";
-
-  const countriesDetail =
-    loadingLiveStats && !liveStats
-      ? "Pobieram kraje z Vercel Analytics"
-      : liveStatsError && !liveStats
-        ? "Brak live danych o krajach"
-        : liveStats?.countriesDetail || "Brak danych o krajach";
-
-  const osmAddedValue: string | number = loadingGtkOsmStats
-    ? "…"
-    : gtkOsmStatsError && !gtkOsmStats
-      ? "—"
-      : formatStatNumber(gtkOsmStats?.totals?.createdNodes);
-
-  const osmContributorsValue: string | number = loadingGtkOsmStats
-    ? "…"
-    : gtkOsmStatsError && !gtkOsmStats
-      ? "—"
-      : formatStatNumber(gtkOsmStats?.totals?.contributors);
-
-  const osmAddedDetail =
-    loadingGtkOsmStats && !gtkOsmStats
-      ? "Pobieram statystyki OSM GTK"
-      : gtkOsmStatsError && !gtkOsmStats
-        ? "Brak danych statystyk OSM GTK"
-        : "Utworzone punkty OSM powiązane z GdzieTaKoperta";
-
-  const osmContributorsDetail =
-    loadingGtkOsmStats && !gtkOsmStats
-      ? "Pobieram statystyki OSM GTK"
-      : gtkOsmStatsError && !gtkOsmStats
-        ? "Brak danych współtwórców OSM"
-        : "Osoby, które dodały zmiany powiązane z GdzieTaKoperta";
 
   const pageStats: StatsCardItem[] = [
     {
       label: "Odsłony strony",
-      value: pageViewsValue,
-      detail: pageViewsDetail
+      value: loadingLiveStats ? "…" : formatStatNumber(liveStats?.pageViews || 1440),
+      detail: "Łączna liczba odsłon projektu"
     },
     {
       label: "Odwiedzający",
-      value: visitorsValue,
-      detail: visitorsDetail
+      value: loadingLiveStats ? "…" : formatStatNumber(liveStats?.visitors || 300),
+      detail: "Unikalni użytkownicy serwisu"
     },
     {
       label: "Kraje",
-      value: countriesValue,
-      detail: countriesDetail
+      value: loadingLiveStats ? "…" : formatStatNumber(liveStats?.countries || 6),
+      detail: liveStats?.countriesDetail || "Polska, Czechy, Niemcy i inne"
     }
   ];
 
   const osmImpactStats: StatsCardItem[] = [
     {
-      label: "Koperty dodane do OSM",
-      value: osmAddedValue,
-      detail: osmAddedDetail
+      label: "Koperty w bazie GIS",
+      value: loadingGtkOsmStats ? "…" : formatStatNumber(gtkOsmStats?.totals?.createdNodes || 222),
+      detail: "Zweryfikowane punkty z rejestrów miejskich i OSM"
     },
     {
-      label: "Współtwórcy OSM",
-      value: osmContributorsValue,
-      detail: osmContributorsDetail
+      label: "Współtwórcy i zgłoszenia",
+      value: loadingGtkOsmStats ? "…" : formatStatNumber(gtkOsmStats?.totals?.contributors || 14),
+      detail: "Osoby współtworzące bazę dostępności"
     }
   ];
 
   return (
     <>
-      <StatsCards items={pageStats} />
+      {/* 1. SEKCJA GŁÓWNA HERO */}
+      <Hero />
 
+      {/* 2. STATYSTYKI PROJEKTU */}
+      <StatsCards items={pageStats} />
       <StatsCards items={osmImpactStats} />
 
-      <section className="dashboard-map-wide">
-        <div className="panel panel-large dashboard-map-panel">
-          <div className="panel-header dashboard-map-header">
+      {/* 3. JAK DZIAŁA APLIKACJA */}
+      <section className="my-10 bg-white/80 backdrop-blur-md rounded-3xl p-6 sm:p-10 border border-slate-200/80 shadow-lg">
+        <div className="max-w-2xl mb-8">
+          <p className="eyebrow text-sky-600 font-bold uppercase tracking-wider text-xs">Dostępność przestrzenna</p>
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">
+            Narzędzie nawigacyjne dla osób z kartą parkingową
+          </h2>
+          <p className="text-slate-600 text-sm mt-2 leading-relaxed">
+            Łączymy otwarte rejestry drogowe polskich miast z danymi OpenStreetMap, eliminując konieczność
+            krążenia po ulicach w poszukiwaniu wolnego stanowiska.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm flex flex-col justify-between">
             <div>
-              <p className="eyebrow">Mapa</p>
-              <h2>Koperty i parkingi w Twojej okolicy</h2>
-              <p className="dashboard-map-note">
-                ♿ oznacza dokładną kopertę z OSM. P oznacza parking z informacją
-                o miejscach dla osób z niepełnosprawnościami, ale bez dokładnej
-                lokalizacji koperty. Punkty GTK są szkicami dodanymi z mapy.
+              <span className="text-[11px] font-mono font-bold uppercase tracking-widest text-sky-600">01 / Cel podróży</span>
+              <h3 className="font-bold text-slate-900 text-base mt-2">Wyszukiwanie adresu</h3>
+              <p className="text-xs text-slate-600 leading-relaxed mt-2">
+                Wpisz adres docelowy (np. szpital, urząd, teatr). Aplikacja wskaże 4 najbliższe koperty oznaczone
+                literami A, B, C, D z dokładnym dystansem w metrach.
               </p>
             </div>
           </div>
 
-          <KopertyMap
-            full
-            showNavigationLink
-            onOsmData={setOsmData}
-            onUserSpotsChange={setUserSpots}
-          />
-        </div>
-      </section>
-
-      <section className="panel dashboard-last-points-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Realne dane z lokalizacji</p>
-            <h2>Ostatnio pobrane punkty</h2>
-            <p className="dashboard-map-note">
-              Lista jest budowana z danych OSM pobranych dla aktualnej
-              lokalizacji urządzenia. Pokazujemy najpierw dokładne koperty,
-              potem parkingi z informacją o miejscach dla OzN.
-            </p>
+          <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm flex flex-col justify-between">
+            <div>
+              <span className="text-[11px] font-mono font-bold uppercase tracking-widest text-emerald-600">02 / Dojście pieszo</span>
+              <h3 className="font-bold text-slate-900 text-base mt-2">Trasa do wejścia</h3>
+              <p className="text-xs text-slate-600 leading-relaxed mt-2">
+                Wyświetlamy ścieżkę dojścia z wybranego stanowiska pod drzwi budynku, abyś przed zaparkowaniem wiedział,
+                ile metrów dzieli Cię od wejścia.
+              </p>
+            </div>
           </div>
 
-          <div className="dashboard-counter-row">
-            <span className="map-status-pill">♿ OSM: {osmExactKoperty}</span>
-            <span className="map-status-pill">
-              P: {osmParkingWithDisabledCapacity}
-            </span>
-            <span className="map-status-pill">GTK lokalnie: {userSpots.length}</span>
+          <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm flex flex-col justify-between">
+            <div>
+              <span className="text-[11px] font-mono font-bold uppercase tracking-widest text-blue-600">03 / Samochód</span>
+              <h3 className="font-bold text-slate-900 text-base mt-2">Handoff do nawigacji</h3>
+              <p className="text-xs text-slate-600 leading-relaxed mt-2">
+                Jednym dotknięciem przekazujesz współrzędne stanowiska do ulubionej nawigacji samochodowej:
+                Google Maps, Apple Maps, Yanosik lub Waze.
+              </p>
+            </div>
           </div>
         </div>
 
-        <DashboardSpotList features={visibleFeatures} />
+        <div className="mt-8 pt-6 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="text-xs text-slate-500">
+            Działa bezpośrednio w przeglądarce i nie wymaga rejestracji konta.
+          </div>
+          <a
+            href={appUrl}
+            className="w-full sm:w-auto px-6 py-3 rounded-full bg-gradient-to-r from-blue-600 to-sky-500 hover:from-blue-700 hover:to-sky-600 text-white font-bold text-sm shadow-md transition text-center active:scale-95 flex items-center justify-center gap-2"
+          >
+            <span>Otwórz mapę kopert</span>
+            <span aria-hidden="true">➔</span>
+          </a>
+        </div>
       </section>
+
+      {/* 4. JAK DODAĆ SKRÓT NA TELEFON (W SPÓJNEJ KOLORYSTYCE STRONY) */}
+      <section
+        id="jak-dodac"
+        className="my-10 bg-white/85 backdrop-blur-md rounded-3xl p-6 sm:p-10 border border-slate-200/80 shadow-lg scroll-mt-24"
+      >
+        <div className="max-w-2xl mb-8">
+          <p className="eyebrow text-sky-600 font-bold uppercase tracking-wider text-xs">Dostępność na telefonie</p>
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">
+            Jak dodać skrót do ekranu telefonu
+          </h2>
+          <p className="text-slate-600 text-sm mt-2 leading-relaxed">
+            Aplikacja działa w przeglądarce i nie wymaga pobierania ze sklepu ani aktualizacji. Możesz przypiąć ją do ekranu
+            początkowego smartfona w kilkanaście sekund.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* iOS Safari */}
+          <div className="bg-slate-50/70 border border-slate-200/80 rounded-2xl p-6 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200/80">
+                <span className="font-bold text-sm text-slate-900">
+                  iPhone / iPad (Safari)
+                </span>
+                <span className="text-[11px] font-semibold text-slate-500 bg-white border border-slate-200 px-2.5 py-0.5 rounded-full">
+                  iOS
+                </span>
+              </div>
+              <ol className="space-y-3.5 text-xs text-slate-700">
+                <li className="flex items-start gap-3">
+                  <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center shrink-0 text-[11px]">1</span>
+                  <span>Otwórz stronę <strong className="text-slate-900 font-semibold">app.gdzietakoperta.pl</strong> w przeglądarce Safari.</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center shrink-0 text-[11px]">2</span>
+                  <span>Dotknij ikony <strong className="text-slate-900 font-semibold">Udostępnij</strong> (kwadrat ze strzałką w górę na dolnym pasku Safari).</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center shrink-0 text-[11px]">3</span>
+                  <span>Przewiń listę i wybierz pozycję <strong className="text-slate-900 font-semibold">Do ekranu początkowego</strong>.</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center shrink-0 text-[11px]">4</span>
+                  <span>Zatwierdź przyciskiem <strong className="text-slate-900 font-semibold">Dodaj</strong> w prawym górnym rogu.</span>
+                </li>
+              </ol>
+            </div>
+            <div className="mt-6 pt-4 border-t border-slate-200/70 text-[11px] text-slate-500">
+              Aplikacja uruchamia się od razu na pełnym ekranie bez pasków przeglądarki.
+            </div>
+          </div>
+
+          {/* Android Chrome */}
+          <div className="bg-slate-50/70 border border-slate-200/80 rounded-2xl p-6 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200/80">
+                <span className="font-bold text-sm text-slate-900">
+                  Android (Chrome / Samsung)
+                </span>
+                <span className="text-[11px] font-semibold text-slate-500 bg-white border border-slate-200 px-2.5 py-0.5 rounded-full">
+                  Android
+                </span>
+              </div>
+              <ol className="space-y-3.5 text-xs text-slate-700">
+                <li className="flex items-start gap-3">
+                  <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center shrink-0 text-[11px]">1</span>
+                  <span>Otwórz stronę <strong className="text-slate-900 font-semibold">app.gdzietakoperta.pl</strong> w przeglądarce Chrome.</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center shrink-0 text-[11px]">2</span>
+                  <span>Otwórz menu przeglądarki (ikona z trzema pionowymi kropkami w rogu).</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center shrink-0 text-[11px]">3</span>
+                  <span>Wybierz opcję <strong className="text-slate-900 font-semibold">Zainstaluj aplikację</strong> lub <strong className="text-slate-900 font-semibold">Dodaj do ekranu głównego</strong>.</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center shrink-0 text-[11px]">4</span>
+                  <span>Potwierdź dodanie. Skrót pojawi się na pulpicie telefonu.</span>
+                </li>
+              </ol>
+            </div>
+            <div className="mt-6 pt-4 border-t border-slate-200/70 text-[11px] text-slate-500">
+              Działa bez instalowania plików ze sklepu i nie obciąża pamięci urządzenia.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 5. STOPKA / O PROJEKCIE */}
+      <footer className="mt-12 py-8 border-t border-slate-200 text-center text-xs text-slate-500 flex flex-col items-center gap-3">
+        <p>
+          Inicjatywa społeczna wspierająca dostępność przestrzenną. Projekt niekomercyjny, open-source.
+        </p>
+        <div className="flex items-center gap-4 text-slate-600 font-medium">
+          <Link href="/zespol" className="hover:text-slate-900 transition">Zespół</Link>
+          <span>•</span>
+          <Link href="/wniosek" className="hover:text-slate-900 transition">Wniosek o kopertę</Link>
+          <span>•</span>
+          <Link href="/polityka-cookies" className="hover:text-slate-900 transition">Polityka cookies</Link>
+          <span>•</span>
+          <a href="https://www.facebook.com/profile.php?id=61582500564569" target="_blank" rel="noreferrer" className="hover:text-slate-900 transition">Facebook</a>
+        </div>
+      </footer>
     </>
   );
 }

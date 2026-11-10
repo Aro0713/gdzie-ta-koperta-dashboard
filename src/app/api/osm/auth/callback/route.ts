@@ -9,6 +9,14 @@ import {
   parseMobileOauthState,
   type OsmSession
 } from "@/lib/osmOAuth";
+import {
+  ADMIN_SESSION_COOKIE,
+  ADMIN_SESSION_MAX_AGE,
+  getAdminCookieOptions,
+  isAdminWhitelisted,
+  signAdminSession,
+  type AdminSession
+} from "@/lib/adminAuth";
 
 type TokenResponse = {
   access_token?: string;
@@ -49,7 +57,22 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get("error");
   const mobileState = state ? parseMobileOauthState(state) : null;
 
+  const cookieStore = await cookies();
+  const isAdminIntent =
+    (state && state.startsWith("admin.")) ||
+    cookieStore.get("gtk_admin_oauth_intent")?.value === "1";
+
   if (error) {
+    if (isAdminIntent) {
+      const res = redirectTo(
+        request,
+        `/admin/login?error=osm_error&reason=${encodeURIComponent(error)}`
+      );
+      res.cookies.delete(OSM_STATE_COOKIE);
+      res.cookies.delete("gtk_admin_oauth_intent");
+      return res;
+    }
+
     if (mobileState) {
       return redirectMobileAuthError(mobileState.returnTo, error);
     }
@@ -58,13 +81,22 @@ export async function GET(request: NextRequest) {
   }
 
   if (!code || !state) {
+    if (isAdminIntent) {
+      return redirectTo(request, "/admin/login?error=missing_code");
+    }
     return redirectTo(request, "/mapa?osm=missing_code");
   }
 
-  const cookieStore = await cookies();
   const expectedState = cookieStore.get(OSM_STATE_COOKIE)?.value;
 
   if (!expectedState || expectedState !== state) {
+    if (isAdminIntent) {
+      const res = redirectTo(request, "/admin/login?error=invalid_state");
+      res.cookies.delete(OSM_STATE_COOKIE);
+      res.cookies.delete("gtk_admin_oauth_intent");
+      return res;
+    }
+
     if (mobileState) {
       return redirectMobileAuthError(mobileState.returnTo, "invalid_state");
     }
@@ -137,6 +169,56 @@ export async function GET(request: NextRequest) {
 
   const encryptedSession = encryptSession(session);
 
+  // Obsługa logowania administratora/moderatora przez OSM
+  if (isAdminIntent) {
+    const isWhitelisted = isAdminWhitelisted(
+      userData.user?.display_name,
+      userData.user?.id
+    );
+
+    if (isWhitelisted) {
+      const adminSession: AdminSession = {
+        username: userData.user?.display_name || String(userData.user?.id || "admin"),
+        authMethod: "osm",
+        osmUserId: userData.user?.id || null,
+        osmAccessToken: tokenData.access_token,
+        issuedAt: Date.now(),
+        expiresAt: Date.now() + ADMIN_SESSION_MAX_AGE * 1000,
+      };
+
+      const adminToken = await signAdminSession(adminSession);
+      const response = redirectTo(request, "/admin");
+
+      response.cookies.set(
+        ADMIN_SESSION_COOKIE,
+        adminToken,
+        getAdminCookieOptions(ADMIN_SESSION_MAX_AGE)
+      );
+
+      // Zapisujemy także sesję OSM
+      response.cookies.set(
+        OSM_SESSION_COOKIE,
+        encryptedSession,
+        getCookieOptions(Math.min(expiresIn, 60 * 60 * 24 * 30))
+      );
+
+      response.cookies.delete(OSM_STATE_COOKIE);
+      response.cookies.delete("gtk_admin_oauth_intent");
+
+      return response;
+    } else {
+      const usernameParam = encodeURIComponent(userData.user?.display_name || "");
+      const idParam = encodeURIComponent(String(userData.user?.id || ""));
+      const response = redirectTo(
+        request,
+        `/admin/login?error=unauthorized_osm&user=${usernameParam}&id=${idParam}`
+      );
+      response.cookies.delete(OSM_STATE_COOKIE);
+      response.cookies.delete("gtk_admin_oauth_intent");
+      return response;
+    }
+  }
+
   if (mobileState) {
     const responseUrl = new URL(mobileState.returnTo);
 
@@ -154,6 +236,7 @@ export async function GET(request: NextRequest) {
 
     const response = NextResponse.redirect(responseUrl);
     response.cookies.delete(OSM_STATE_COOKIE);
+    response.cookies.delete("gtk_admin_oauth_intent");
 
     return response;
   }
@@ -167,6 +250,7 @@ export async function GET(request: NextRequest) {
   );
 
   response.cookies.delete(OSM_STATE_COOKIE);
+  response.cookies.delete("gtk_admin_oauth_intent");
 
   return response;
 }

@@ -1,12 +1,10 @@
-﻿import { DashboardHome } from "@/components/DashboardHome";
 import { Header } from "@/components/Header";
-import { Hero } from "@/components/Hero";
+import { DashboardHome } from "@/components/DashboardHome";
 
-export default function Home() {
+export default function HomePage() {
   return (
     <main className="page-shell">
       <Header />
-      <Hero />
       <DashboardHome />
     </main>
   );

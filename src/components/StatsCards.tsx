@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 
 export type StatsCardItem = {
   label: string;
@@ -6,34 +6,6 @@ export type StatsCardItem = {
   detail: string;
   href?: string;
 };
-
-const defaultStats: StatsCardItem[] = [
-  {
-    label: "koperty w bazie",
-    value: "—",
-    detail: "czekam na lokalizację"
-  },
-  {
-    label: "nowe koperty GTK",
-    value: "—",
-    detail: "punkty dodane przez użytkowników"
-  },
-  {
-    label: "potwierdzone",
-    value: "—",
-    detail: "próg: 5 potwierdzeń"
-  },
-  {
-    label: "do sprawdzenia",
-    value: "—",
-    detail: "czekają na społeczność"
-  },
-  {
-    label: "wnioski",
-    value: "—",
-    detail: "z modułu wniosków"
-  }
-];
 
 function StatsCardContent({ item }: { item: StatsCardItem }) {
   return (
@@ -45,7 +17,7 @@ function StatsCardContent({ item }: { item: StatsCardItem }) {
   );
 }
 
-export function StatsCards({ items = defaultStats }: { items?: StatsCardItem[] }) {
+export function StatsCards({ items }: { items: StatsCardItem[] }) {
   return (
     <section className="stats-grid" aria-label="Statystyki projektu">
       {items.map((item) => {

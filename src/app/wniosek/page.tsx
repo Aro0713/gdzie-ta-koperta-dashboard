@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -105,7 +105,7 @@ export default function WniosekPage() {
             <span>złożone · w toku · odpowiedź · zamknięte</span>
           </div>
 
-          <Link className="text-link" href="/mapa">
+          <Link className="text-link" href="/">
             Wróć do mapy
           </Link>
         </aside>

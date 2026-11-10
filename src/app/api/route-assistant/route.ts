@@ -68,6 +68,10 @@ type GtkSubmissionRow = {
   lng: number;
   submitted_by_name: string | null;
   distance_meters: number;
+  external_id?: string | null;
+  confidence_score?: number | null;
+  sources_provenance?: unknown;
+  last_verified_at?: string | null;
 };
 
 type FeatureWithExtendedProperties = OsmParkingFeature & {
@@ -569,21 +573,19 @@ async function getGtkSubmissionsNearDestination(lat: number, lng: number) {
         submission.lat::float,
         submission.lng::float,
         submission.submitted_by_name,
+        submission.external_id,
+        submission.confidence_score,
+        submission.sources_provenance,
+        submission.last_verified_at::text,
         ST_Distance(
-          ST_SetSRID(
-            ST_MakePoint(submission.lng::float, submission.lat::float),
-            4326
-          )::geography,
+          submission.geom,
           destination.geom
         )::float AS distance_meters
       FROM gtk_osm_submissions AS submission, destination
       WHERE
-        submission.status = 'submitted_to_osm'
+        submission.status IN ('submitted_to_osm', 'approved')
         AND ST_DWithin(
-          ST_SetSRID(
-            ST_MakePoint(submission.lng::float, submission.lat::float),
-            4326
-          )::geography,
+          submission.geom,
           destination.geom,
           5000
         )

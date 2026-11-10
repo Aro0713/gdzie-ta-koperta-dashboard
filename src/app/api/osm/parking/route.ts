@@ -1,6 +1,7 @@
-﻿import { readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import type { Feature, FeatureCollection, Point } from "geojson";
 import { sql } from "@/lib/db";
 
@@ -10,6 +11,9 @@ export const dynamic = "force-dynamic";
 type SnapshotProperties = {
   source?: string;
   sourceStatus?: string;
+  isCommunitySpot?: boolean;
+  photoUrl?: string | null;
+  notes?: string | null;
   objectType?: string;
   osmType?: string;
   osmId?: number | string | null;
@@ -30,6 +34,12 @@ type SnapshotProperties = {
   originalGeometryType?: string | null;
   distanceMeters?: number;
   tags?: Record<string, string>;
+  externalId?: string | null;
+  confidenceScore?: number;
+  sourcesProvenance?: any[];
+  sourceType?: string | null;
+  authority?: string | null;
+  lastVerifiedAt?: string | null;
 };
 
 type SnapshotFeature = Feature<Point, SnapshotProperties>;
@@ -56,8 +66,13 @@ type GtkSubmissionRow = {
   osm_url: string | null;
   lat: number | string | null;
   lng: number | string | null;
+  metadata?: any;
   submitted_at: string | null;
   status: string | null;
+  external_id?: string | null;
+  confidence_score?: number | null;
+  sources_provenance?: unknown;
+  last_verified_at?: string | null;
 };
 
 let cachedSnapshot: SnapshotCollection | null = null;
@@ -373,16 +388,21 @@ function formatDateOnly(value: string | null) {
 function gtkSubmissionToFeature(row: GtkSubmissionRow): SnapshotFeature | null {
   const lat = Number(row.lat);
   const lng = Number(row.lng);
-  const osmId = Number(row.osm_id);
+  const rawOsmId = row.osm_id !== null && row.osm_id !== undefined ? Number(row.osm_id) : null;
+  const syntheticId = Math.abs(
+    (row.id || "gtk").split("").reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0)
+  );
+  const osmId = rawOsmId !== null && Number.isFinite(rawOsmId) ? rawOsmId : syntheticId;
   const osmType = String(row.osm_type || "node");
 
-  if (!isValidLatLng(lat, lng) || !Number.isFinite(osmId)) {
+  if (!isValidLatLng(lat, lng)) {
     return null;
   }
 
   const osmUrl =
-    row.osm_url || `https://www.openstreetmap.org/${osmType}/${osmId}`;
+    row.osm_url || (rawOsmId ? `https://www.openstreetmap.org/${osmType}/${osmId}` : null);
   const checkDate = formatDateOnly(row.submitted_at);
+  const meta = row.metadata || {};
 
   return {
     type: "Feature",
@@ -392,17 +412,20 @@ function gtkSubmissionToFeature(row: GtkSubmissionRow): SnapshotFeature | null {
     },
     properties: {
       source: "gdzietakoperta",
-      sourceStatus: "gtk_osm_submissions",
+      sourceStatus: row.status === "submitted_to_osm" ? "gtk_osm_submissions" : "community_verified",
+      isCommunitySpot: true,
+      photoUrl: meta.photoUrl || null,
+      notes: meta.notes || null,
       objectType: "disabled_parking_space",
       osmType,
       osmId,
       osmUrl,
-      name: null,
+      name: meta.address || null,
       amenity: "parking_space",
       parking: null,
       parkingSpace: "disabled",
       capacity: null,
-      capacityDisabled: "1",
+      capacityDisabled: meta.slotsCount ? String(meta.slotsCount) : "1",
       access: null,
       wheelchair: null,
       surface: null,
@@ -411,19 +434,29 @@ function gtkSubmissionToFeature(row: GtkSubmissionRow): SnapshotFeature | null {
       areaName: undefined,
       syncedAt: row.submitted_at || undefined,
       originalGeometryType: "Point",
+      externalId: row.external_id || null,
+      confidenceScore: typeof row.confidence_score === "number" ? row.confidence_score : 85,
+      sourcesProvenance: Array.isArray(row.sources_provenance) ? row.sources_provenance : [],
+      sourceType: row.source_type || null,
+      authority: meta.authority || null,
+      lastVerifiedAt: row.last_verified_at || row.submitted_at || null,
       tags: {
         amenity: "parking_space",
         parking_space: "disabled",
         ...(checkDate ? { check_date: checkDate } : {}),
         "source:registry": "GdzieTaKoperta",
         "gtk:submitted_by": row.submitted_by_name || "",
-        "gtk:source_type": row.source_type || "manual"
+        "gtk:source_type": row.source_type || "manual",
+        ...(row.external_id ? { "gtk:external_id": row.external_id } : {}),
+        ...(row.confidence_score ? { "gtk:confidence": String(row.confidence_score) } : {}),
+        ...(meta.photoUrl ? { "photo:url": meta.photoUrl } : {}),
+        ...(meta.notes ? { description: meta.notes } : {})
       }
     }
   };
 }
 
-async function loadGtkSubmissionFeatures() {
+async function fetchGtkSubmissionFeaturesFromDb() {
   try {
     const rows = (await sql`
       SELECT
@@ -438,13 +471,16 @@ async function loadGtkSubmissionFeatures() {
         osm_url,
         lat::float,
         lng::float,
+        metadata,
         submitted_at::text,
-        status
+        status,
+        external_id,
+        confidence_score,
+        sources_provenance,
+        last_verified_at::text
       FROM gtk_osm_submissions
       WHERE
-        status = 'submitted_to_osm'
-        AND osm_type IS NOT NULL
-        AND osm_id IS NOT NULL
+        status IN ('submitted_to_osm', 'approved')
         AND lat IS NOT NULL
         AND lng IS NOT NULL
       ORDER BY submitted_at DESC
@@ -460,6 +496,96 @@ async function loadGtkSubmissionFeatures() {
 
     return [];
   }
+}
+
+const getCachedGtkSubmissionFeatures = unstable_cache(
+  fetchGtkSubmissionFeaturesFromDb,
+  ["gtk-osm-submissions-features"],
+  {
+    revalidate: 60,
+    tags: ["gtk_osm_submissions"]
+  }
+);
+
+async function loadGtkSubmissionFeatures() {
+  return getCachedGtkSubmissionFeatures();
+}
+
+async function fetchSuppressedSpotKeysFromDb(): Promise<string[]> {
+  try {
+    const rows = (await sql`
+      SELECT
+        osm_id::text,
+        metadata->>'spotId' as target_spot_id,
+        lat::float,
+        lng::float
+      FROM gtk_osm_submissions
+      WHERE status IN ('removed', 'confirmed_removed')
+    `) as Array<{
+      osm_id: string | null;
+      target_spot_id: string | null;
+      lat: number | null;
+      lng: number | null;
+    }>;
+
+    const keys: string[] = [];
+    for (const r of rows) {
+      if (r.osm_id) keys.push(`id:${r.osm_id}`);
+      if (r.target_spot_id) keys.push(`id:${r.target_spot_id}`);
+      if (r.lat && r.lng) {
+        keys.push(`geo:${r.lat.toFixed(4)}:${r.lng.toFixed(4)}`);
+      }
+    }
+    return keys;
+  } catch (error) {
+    console.error("[api/osm/parking] Failed to load suppressed spots", error);
+    return [];
+  }
+}
+
+const getCachedSuppressedSpotKeys = unstable_cache(
+  fetchSuppressedSpotKeysFromDb,
+  ["gtk-suppressed-spot-keys"],
+  {
+    revalidate: 60,
+    tags: ["gtk_osm_submissions"]
+  }
+);
+
+async function loadSuppressedSpotKeys() {
+  return getCachedSuppressedSpotKeys();
+}
+
+async function fetchSpotConfirmationsFromDb(): Promise<Record<string, number>> {
+  try {
+    const rows = (await sql`
+      SELECT spot_id, confirmations_count
+      FROM gtk_spot_confirmations;
+    `) as Array<{ spot_id: string; confirmations_count: number }>;
+
+    const map: Record<string, number> = {};
+    for (const r of rows) {
+      if (r.spot_id) {
+        map[r.spot_id] = Number(r.confirmations_count) || 1;
+      }
+    }
+    return map;
+  } catch (error) {
+    return {};
+  }
+}
+
+const getCachedSpotConfirmations = unstable_cache(
+  fetchSpotConfirmationsFromDb,
+  ["gtk-spot-confirmations-map"],
+  {
+    revalidate: 30,
+    tags: ["gtk_osm_submissions", "spots"]
+  }
+);
+
+async function loadSpotConfirmations() {
+  return getCachedSpotConfirmations();
 }
 
 function getDedupeKey(feature: SnapshotFeature) {
@@ -483,17 +609,50 @@ function getDedupeKey(feature: SnapshotFeature) {
   return JSON.stringify(feature.geometry);
 }
 
+function isFeatureSuppressed(
+  feature: SnapshotFeature,
+  suppressedKeys: Set<string>
+) {
+  if (suppressedKeys.size === 0) return false;
+  const props = feature.properties || {};
+  const osmId =
+    props.osmId !== undefined && props.osmId !== null
+      ? String(props.osmId)
+      : null;
+
+  if (
+    osmId &&
+    (suppressedKeys.has(`id:${osmId}`) || suppressedKeys.has(osmId))
+  ) {
+    return true;
+  }
+
+  const pos = getFeatureLatLng(feature);
+  if (pos) {
+    const geoKey = `geo:${pos.lat.toFixed(4)}:${pos.lng.toFixed(4)}`;
+    const coordKey = `id:${pos.lat}-${pos.lng}`;
+    if (suppressedKeys.has(geoKey) || suppressedKeys.has(coordKey)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function mergeSnapshotAndGtkRegistryFeatures(
   snapshotFeatures: SnapshotFeature[],
-  gtkRegistryFeatures: SnapshotFeature[]
+  gtkRegistryFeatures: SnapshotFeature[],
+  suppressedKeys: Set<string>
 ) {
   const byKey = new Map<string, SnapshotFeature>();
 
   for (const feature of snapshotFeatures) {
+    if (isFeatureSuppressed(feature, suppressedKeys)) continue;
     byKey.set(getDedupeKey(feature), feature);
   }
 
   for (const feature of gtkRegistryFeatures) {
+    if (isFeatureSuppressed(feature, suppressedKeys)) continue;
     byKey.set(getDedupeKey(feature), feature);
   }
 
@@ -507,18 +666,47 @@ export async function GET(request: NextRequest) {
     const scope = searchParams.get("scope");
     const sourceFilter = searchParams.get("source");
 
-    const [snapshot, snapshotMetadata, gtkRegistryFeatures] = await Promise.all([
+    const [snapshot, snapshotMetadata, gtkRegistryFeatures, suppressedKeysList, confirmationsMap] = await Promise.all([
       loadSnapshot(),
       loadSnapshotMetadata(),
-      loadGtkSubmissionFeatures()
+      loadGtkSubmissionFeatures(),
+      loadSuppressedSpotKeys(),
+      loadSpotConfirmations()
     ]);
+
+    const suppressedKeys = new Set(suppressedKeysList);
 
     const mergedFeatures = mergeSnapshotAndGtkRegistryFeatures(
       snapshot.features,
-      gtkRegistryFeatures
+      gtkRegistryFeatures,
+      suppressedKeys
     );
 
-    const displayableFeatures = filterDisplayableFeatures(mergedFeatures);
+    const baseDisplayableFeatures = filterDisplayableFeatures(mergedFeatures);
+
+    // Wzbogacenie punktów (zarówno OSM, jak i GTK) o aktualne potwierdzenia kierowców bez tworzenia duplikatów
+    const displayableFeatures = baseDisplayableFeatures.map((f) => {
+      const p = f.properties || {};
+      const osmId = p.osmId !== null && p.osmId !== undefined ? String(p.osmId) : null;
+      const spotId = osmId || (f as any).id || (p as any).externalId || "";
+      const count =
+        (osmId && confirmationsMap[osmId]) ||
+        (spotId && confirmationsMap[spotId]) ||
+        (osmId && confirmationsMap[`osm_${osmId}`]) ||
+        0;
+
+      if (count > 0) {
+        return {
+          ...f,
+          properties: {
+            ...p,
+            verifiedCount: count,
+            confirmations: count
+          }
+        };
+      }
+      return f;
+    });
 
     if (scope === "country") {
       const countryFeatures = displayableFeatures

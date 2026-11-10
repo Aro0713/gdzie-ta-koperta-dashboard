@@ -152,11 +152,8 @@ export default function PolitykaCookiesPage() {
           </p>
 
           <div className="legal-actions">
-            <Link href="/" className="ghost-button">
-              Wróć na stronę główną
-            </Link>
-            <Link href="/mapa" className="primary-button">
-              Przejdź do mapy
+            <Link href="/" className="primary-button">
+              Wróć do mapy
             </Link>
           </div>
         </div>

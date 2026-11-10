@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { sql } from "@/lib/db";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
 type SubmissionStatsRow = {
   submissions: number;
@@ -44,8 +44,8 @@ function formatCountriesDetail() {
     .join(", ");
 }
 
-export async function GET() {
-  try {
+const getCachedGtkOsmStats = unstable_cache(
+  async () => {
     const rows = (await sql`
       SELECT
         COUNT(*)::int AS submissions,
@@ -55,11 +55,22 @@ export async function GET() {
       WHERE status = 'submitted_to_osm'
     `) as SubmissionStatsRow[];
 
-    const live = rows[0] || {
+    return rows[0] || {
       submissions: 0,
       contributors: 0,
       changesets: 0
     };
+  },
+  ["gtk-osm-stats-cache"],
+  {
+    revalidate: 60,
+    tags: ["gtk_osm_submissions"]
+  }
+);
+
+export async function GET() {
+  try {
+    const live = await getCachedGtkOsmStats();
 
     const liveSubmissions = toSafeNumber(live.submissions);
     const liveContributors = toSafeNumber(live.contributors);

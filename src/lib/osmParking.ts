@@ -1,4 +1,4 @@
-﻿import type { Feature, FeatureCollection, Point } from "geojson";
+import type { Feature, FeatureCollection, Point } from "geojson";
 
 export type OsmParkingProperties = {
   source?: string;
@@ -19,6 +19,21 @@ export type OsmParkingProperties = {
   operator?: string | null;
   distanceMeters?: number;
   tags?: Record<string, string>;
+  externalId?: string | null;
+  confidenceScore?: number;
+  sourcesProvenance?: Array<{
+    sourceType?: string;
+    externalId?: string | null;
+    authority?: string | null;
+    distanceDiffMeters?: number | null;
+    syncedAt?: string;
+    metadata?: Record<string, unknown>;
+  }>;
+  sourceType?: string | null;
+  authority?: string | null;
+  lastVerifiedAt?: string | null;
+  verifiedCount?: number;
+  confirmations?: number;
 };
 
 export type OsmParkingFeature = Feature<Point, OsmParkingProperties>;
