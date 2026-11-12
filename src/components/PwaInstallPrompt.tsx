@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { getMainSiteUrl } from "@/lib/appUrl";
+import Link from "next/link";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -14,12 +14,9 @@ export function PwaInstallPrompt() {
   const [isIos, setIsIos] = useState(false);
   const [isDismissed, setIsDismissed] = useState(true);
   const [showIosGuide, setShowIosGuide] = useState(false);
-  const [mainSiteUrl, setMainSiteUrl] = useState("/");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-
-    setMainSiteUrl(getMainSiteUrl());
 
     // 1. Sprawdzenie, czy aplikacja jest już uruchomiona na pełnym ekranie
     const isStandaloneMode =
@@ -140,12 +137,12 @@ export function PwaInstallPrompt() {
       )}
 
       <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
-        <a
-          href={mainSiteUrl}
+        <Link
+          href="/"
           className="text-[11px] font-medium text-slate-500 hover:text-sky-600 transition underline underline-offset-2"
         >
           Strona informacyjna
-        </a>
+        </Link>
 
         {deferredPrompt ? (
           <button

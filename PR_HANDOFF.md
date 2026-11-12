@@ -45,11 +45,10 @@ feat: Produkcyjna platforma GIS z routingiem subdomen (app.), bazą PostGIS i no
 
 W ramach tego PR-a przygotowaliśmy pełną, produkcyjną architekturę systemu **Gdzie Ta Koperta**, rozdzielając serwis na stronę główną / wizerunkową oraz dedykowaną aplikację mapową dla kierowców:
 
-1. **Architektura Subdomen (`app.gdzietakoperta.pl` + `gdzietakoperta.pl`):**
-   - Wdrożono Next.js 15 Subdomain Routing przez `src/middleware.ts`.
-   - **`gdzietakoperta.pl`**: Lekki, wizerunkowy landing page / dashboard z misją projektu, statystykami i poradnikiem dodania skrótu na telefon (ultra-szybki, First Load JS zaledwie 114 kB, zero ciężkich bibliotek mapowych pod SEO).
-   - **`app.gdzietakoperta.pl`**: Pełnoekranowa, natywna aplikacja nawigacyjna PWA z klastrowaniem, geokodowaniem Photon i routingiem pieszym OSRM.
-   - Płynny powrót między serwisami w obie strony.
+1. **Architektura Pojedynczej Domeny (`gdzietakoperta.pl` + `gdzietakoperta.pl/app`):**
+   - **`gdzietakoperta.pl`**: Lekki, wizerunkowy landing page / dashboard z misją projektu, statystykami i poradnikiem dodania skrótu na telefon (ultra-szybki, zero ciężkich bibliotek mapowych pod SEO).
+   - **`gdzietakoperta.pl/app`**: Pełnoekranowa, natywna aplikacja nawigacyjna PWA z klastrowaniem, geokodowaniem Photon i routingiem pieszym OSRM.
+   - Płynne, natywne przejścia SPA w obie strony (`Link` Next.js) bez zbędnych subdomen i bez potrzeby konfiguracji rekordów CNAME w DNS. Jeśli ktoś wejdzie przez stary adres `app.gdzietakoperta.pl`, middleware automatycznie przekieruje go do `/app`.
 
 2. **Silnik Przestrzenny PostGIS (Spatial Conflation) & Baza Neon:**
    - Zastąpienie statycznych plików JSON i zapytań Overpass API dedykowaną bazą Neon PostgreSQL z rozszerzeniem **PostGIS 3.6**.
@@ -86,14 +85,11 @@ Po zmergowaniu PR-a należy ustawić poniższe zmienne środowiskowe w panelu Ve
 | `CLOUDINARY_API_SECRET` | Klucz tajny Cloudinary API | Dashboard Cloudinary |
 | `ADMIN_SECRET` | Losowy silny klucz dostępu do panelu /admin | `openssl rand -hex 32` |
 | `ADMIN_OSM_USERS` | Loginy OSM z uprawnieniami moderatora | `Aro0713,808sBartye` |
-| `NEXT_PUBLIC_APP_URL` | Adres subdomeny aplikacji | `https://app.gdzietakoperta.pl` |
-| `NEXT_PUBLIC_MAIN_URL` | Adres domeny głównej | `https://gdzietakoperta.pl` |
 
 ### 2. Konfiguracja Domen w Vercel:
-W zakładce **Project Settings -> Domains** przypinamy do tego samego projektu dwie domeny:
-1. `gdzietakoperta.pl` (oraz `www.gdzietakoperta.pl` jako redirect)
-2. `app.gdzietakoperta.pl` (jako subdomena)
-Next.js `middleware.ts` automatycznie przekieruje ruch z `app.` na aplikację mapową, a z `gdzietakoperta.pl` na stronę główną.
+Wystarczy standardowo podpięta domena główna:
+1. `gdzietakoperta.pl` (oraz `www.gdzietakoperta.pl` jako redirect).
+Nie są wymagane żadne subdomeny ani dodatkowe rekordy CNAME.
 
 ### 3. Inicjalizacja Bazy Danych Neon:
 W konsoli SQL bazy Neon (neon.tech) wystarczy jednorazowo włączyć rozszerzenie:

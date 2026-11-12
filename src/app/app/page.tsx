@@ -10,7 +10,6 @@ import { ReportIssueModal } from "@/components/ReportIssueModal";
 import { NearbySpotsList } from "@/components/NearbySpotsList";
 import { MapPointPicker } from "@/components/MapPointPicker";
 import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
-import { getMainSiteUrl } from "@/lib/appUrl";
 
 const GtkMap = dynamic(() => import("@/components/GtkMap"), {
   ssr: false,
@@ -39,7 +38,6 @@ export default function AppPage() {
   const [flyToTrigger, setFlyToTrigger] = useState<{ lat: number; lng: number; zoom?: number; timestamp: number } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
-  const [mainSiteUrl, setMainSiteUrl] = useState("/");
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -49,9 +47,6 @@ export default function AppPage() {
   };
 
   useEffect(() => {
-    // Ustalenie adresu strony głównej (domeny nadrzędnej)
-    setMainSiteUrl(getMainSiteUrl());
-
     // 0. Sprawdzenie parametrów w URL (?lat=...&lng=... oraz ?report=1)
     if (typeof window !== "undefined") {
       const urlParams = new URLSearchParams(window.location.search);
@@ -225,26 +220,26 @@ export default function AppPage() {
                 <span className="text-xs font-bold text-slate-100 hidden sm:inline">Gdzie ta koperta?</span>
               </button>
             ) : (
-              <a
-                href={mainSiteUrl}
+              <Link
+                href="/"
                 aria-label="Wróć do strony głównej Gdzie Ta Koperta"
                 className="bg-slate-900/90 hover:bg-slate-800/90 backdrop-blur-md text-white px-3 py-1.5 rounded-xl shadow-lg border border-slate-800 flex items-center gap-2 shrink-0 active:scale-95 transition focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:outline-none"
               >
                 <span className="font-mono text-sky-400 font-extrabold text-xs tracking-wider" aria-hidden="true">♿ GTK</span>
                 <span className="text-xs font-bold text-slate-100 hidden sm:inline">Gdzie ta koperta?</span>
-              </a>
+              </Link>
             )}
 
             <div className="flex items-center gap-2">
               {!isStandalone && (
-                <a
-                  href={mainSiteUrl}
+                <Link
+                  href="/"
                   title="Wróć do strony głównej serwisu"
                   className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white font-semibold text-xs border border-slate-700 shadow-md backdrop-blur-md transition active:scale-95 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
                 >
                   <span aria-hidden="true">←</span>
                   <span>Strona główna</span>
-                </a>
+                </Link>
               )}
 
               <button
