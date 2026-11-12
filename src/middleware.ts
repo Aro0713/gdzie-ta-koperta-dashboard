@@ -14,22 +14,15 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 2. Wykrywanie subdomeny aplikacji (np. app.gdzietakoperta.pl lub w dev app.localhost:3000)
-  const isAppSubdomain =
-    host.startsWith("app.") ||
-    host.startsWith("app-") ||
-    request.nextUrl.searchParams.get("view") === "app";
-
-  if (isAppSubdomain) {
-    // Jeśli użytkownik jest na stronie głównej subdomeny (app.gdzietakoperta.pl/),
-    // przepisujemy URL wewnętrznie do /app, zachowując czysty adres w przeglądarce
-    if (pathname === "/") {
-      const url = request.nextUrl.clone();
-      url.pathname = "/app";
-      return NextResponse.rewrite(url);
-    }
-
-    return NextResponse.next();
+  // 2. Jeśli ktoś wejdzie przez starą subdomenę app. (np. app.gdzietakoperta.pl),
+  // przekieruj trwale na główną domenę do /app
+  if (host.startsWith("app.")) {
+    const rootHost = host.replace(/^app\./, "");
+    const destinationPath = pathname === "/" ? "/app" : pathname;
+    const protocol = request.nextUrl.protocol || "https:";
+    const redirectUrl = new URL(destinationPath, `${protocol}//${rootHost}`);
+    redirectUrl.search = request.nextUrl.search;
+    return NextResponse.redirect(redirectUrl, 308);
   }
 
   // 3. Główna domena (gdzietakoperta.pl) – standardowa obsługa tras

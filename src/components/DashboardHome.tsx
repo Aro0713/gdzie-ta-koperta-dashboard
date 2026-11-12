@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Hero } from "@/components/Hero";
 import { StatsCards, type StatsCardItem } from "@/components/StatsCards";
-import { getAppUrl } from "@/lib/appUrl";
 
 type DashboardLiveStatsResponse = {
   ok?: boolean;
@@ -43,10 +42,7 @@ export function DashboardHome() {
   const [gtkOsmStats, setGtkOsmStats] = useState<GtkOsmStatsResponse | null>(null);
   const [loadingGtkOsmStats, setLoadingGtkOsmStats] = useState(true);
 
-  const [appUrl, setAppUrl] = useState("/app");
-
   useEffect(() => {
-    setAppUrl(getAppUrl());
     let active = true;
 
     async function loadLiveStats() {
@@ -175,13 +171,13 @@ export function DashboardHome() {
           <div className="text-xs text-slate-500">
             Działa bezpośrednio w przeglądarce i nie wymaga rejestracji konta.
           </div>
-          <a
-            href={appUrl}
+          <Link
+            href="/app"
             className="w-full sm:w-auto px-6 py-3 rounded-full bg-gradient-to-r from-blue-600 to-sky-500 hover:from-blue-700 hover:to-sky-600 text-white font-bold text-sm shadow-md transition text-center active:scale-95 flex items-center justify-center gap-2"
           >
             <span>Otwórz mapę kopert</span>
             <span aria-hidden="true">➔</span>
-          </a>
+          </Link>
         </div>
       </section>
 
@@ -216,7 +212,7 @@ export function DashboardHome() {
               <ol className="space-y-3.5 text-xs text-slate-700">
                 <li className="flex items-start gap-3">
                   <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center shrink-0 text-[11px]">1</span>
-                  <span>Otwórz stronę <strong className="text-slate-900 font-semibold">app.gdzietakoperta.pl</strong> w przeglądarce Safari.</span>
+                  <span>Otwórz stronę <strong className="text-slate-900 font-semibold">gdzietakoperta.pl/app</strong> w przeglądarce Safari.</span>
                 </li>
                 <li className="flex items-start gap-3">
                   <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center shrink-0 text-[11px]">2</span>
@@ -251,7 +247,7 @@ export function DashboardHome() {
               <ol className="space-y-3.5 text-xs text-slate-700">
                 <li className="flex items-start gap-3">
                   <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center shrink-0 text-[11px]">1</span>
-                  <span>Otwórz stronę <strong className="text-slate-900 font-semibold">app.gdzietakoperta.pl</strong> w przeglądarce Chrome.</span>
+                  <span>Otwórz stronę <strong className="text-slate-900 font-semibold">gdzietakoperta.pl/app</strong> w przeglądarce Chrome.</span>
                 </li>
                 <li className="flex items-start gap-3">
                   <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center shrink-0 text-[11px]">2</span>

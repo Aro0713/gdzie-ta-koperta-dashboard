@@ -1,15 +1,6 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { getAppUrl } from "@/lib/appUrl";
+import Link from "next/link";
 
 export function Hero() {
-  const [appUrl, setAppUrl] = useState("/app");
-
-  useEffect(() => {
-    setAppUrl(getAppUrl());
-  }, []);
-
   return (
     <section className="hero-card">
       <div className="hero-copy">
@@ -23,13 +14,13 @@ export function Hero() {
         </p>
 
         <div className="mt-8 flex flex-wrap items-center gap-4">
-          <a
-            href={appUrl}
+          <Link
+            href="/app"
             className="inline-flex items-center justify-center min-h-[46px] px-6 rounded-full text-white font-bold text-sm bg-gradient-to-r from-blue-600 to-sky-500 hover:from-blue-700 hover:to-sky-600 shadow-lg shadow-sky-500/25 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
           >
             <span>Uruchom aplikację</span>
             <span className="ml-2 font-mono text-base" aria-hidden="true">➔</span>
-          </a>
+          </Link>
 
           <a
             href="#jak-dodac"
