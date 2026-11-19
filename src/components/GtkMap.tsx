@@ -706,15 +706,7 @@ export default function GtkMap({
 
       allSpotsDataRef.current = loadedSpots;
 
-      const isForDest =
-        isDestination ||
-        Boolean(
-          activeDest &&
-            Math.abs(lat - activeDest.lat) < 0.02 &&
-            Math.abs(lng - activeDest.lng) < 0.02
-        );
-
-      if (isForDest) {
+      if (isDestination) {
         onDestinationSpotsLoadedRef.current?.(loadedSpots);
       }
       onSpotsLoadedRef.current?.(loadedSpots);

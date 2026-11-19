@@ -147,10 +147,10 @@ export default function AppPage() {
     setDestinationResetKey((prev) => prev + 1);
   };
 
-  // Obliczenie top 4 miejsc A, B, C, D dla ustawionego celu
+  // Obliczenie top 3 miejsc A, B, C dla ustawionego celu (każde inne wybrane z mapy dostaje literę D)
   const topSpots = useMemo(() => {
     if (!destination || destinationSpots.length === 0) return [];
-    return destinationSpots.slice(0, 4);
+    return destinationSpots.slice(0, 3);
   }, [destination, destinationSpots]);
 
   // Jeśli użytkownik wybrał miejsce spoza top 4 (np. D lub dalsze na mapie), dołączamy je jako dodatkowe
@@ -374,7 +374,7 @@ export default function AppPage() {
           <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200/95 p-3 flex items-center justify-between gap-3 max-w-md mx-auto sm:mx-0">
             <div className="flex items-center gap-2.5 min-w-0">
               {(() => {
-                const letters = ["A", "B", "C", "D"];
+                const letters = ["A", "B", "C"];
                 const idx = topSpots.findIndex((s) => s.id === selectedSpot.id);
                 const letter = idx !== -1 && idx < letters.length ? letters[idx] : "D";
                 const isVerified =
